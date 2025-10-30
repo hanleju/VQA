@@ -39,6 +39,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     os.makedirs(args.model_save_path, exist_ok=True)
+    log_path = os.path.join(args.model_save_path, "log.txt")
 
     # --- 데이터셋 및 로더 준비 ---
     image_transform = transforms.Compose([
@@ -113,25 +114,28 @@ def main():
     
     best_val_acc = 0.0
 
-    for epoch in range(args.epochs):
-        print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
+    with open(log_path, "w") as log_file:
+        for epoch in range(args.epochs):
+            print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
 
-        # Train
-        train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
+            # Train
+            train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
 
-        # Validation
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
+            # Validation
+            val_loss, val_acc = validate(model, val_loader, criterion, device)
 
-        print(f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+            log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
+            print(log_msg)
+            log_file.write(log_msg + "\n")
+            log_file.flush()
 
-        scheduler.step()
+            scheduler.step()
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            save_path = os.path.join(args.model_save_path, f"best_model_epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
-            torch.save(model.state_dict(), save_path)
-            print(f"New Best Model: {save_path}")
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                save_path = os.path.join(args.model_save_path, f"best_model_epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
+                torch.save(model.state_dict(), save_path)
+                print(f"New Best Model: {save_path}")
 
     print(f"\n--- Train End ---")
     print(f"Best Validation ACC: {best_val_acc:.2f}%")
