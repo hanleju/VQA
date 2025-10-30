@@ -1,9 +1,8 @@
 import os
 import json
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from PIL import Image
-from torchvision import transforms
 
 class VQADataset(Dataset):
     """
@@ -62,7 +61,7 @@ class VQADataset(Dataset):
         
         self.num_answers = len(self.idx_to_answer)
         if self.num_answers > 0:
-             print(f"총 {len(self.annotations)}개의 샘플과 {self.num_answers}개의 고유한 답변을 로드했습니다.")
+             print(f"Data sample: {len(self.annotations)}, Label: {self.num_answers}.")
 
 
     def __len__(self):
