@@ -13,8 +13,8 @@ from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import train, validate
-from model.vision_encoder import VisionEncoder_ResNet50
-from model.text_encoder import TextEncoder_Bert
+from model.vision_encoder import CNN, ResNet50
+from model.text_encoder import Bert
 from model.model import VQAModel
 
 def parse_args():
@@ -93,17 +93,14 @@ def main():
         pin_memory=True
     )
 
-    # 1. 문자열 이름을 실제 클래스 객체로 연결하는 딕셔너리 생성
     VISION_MODELS = {
-        "VisionEncoder_ResNet50": VisionEncoder_ResNet50
-        # 나중에 다른 모델을 추가할 수 있습니다. 예: "VisionEncoder_ViT": VisionEncoder_ViT
+        "CNN": CNN,
+        "ResNet50": ResNet50
     }
     TEXT_MODELS = {
-        "TextEncoder_Bert": TextEncoder_Bert
-        # 나중에 다른 모델을 추가할 수 있습니다. 예: "TextEncoder_CLIP": TextEncoder_CLIP
+        "Bert": Bert
     }
 
-    # 2. YAML에서 읽어온 문자열(args.Vision)로 딕셔너리에서 실제 클래스를 조회
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
 
@@ -112,7 +109,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    print(f"Fusion : {args.fusion_type} \n Start Train...")
+    print(f"Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type} \n Start Train...")
     
     best_val_acc = 0.0
 

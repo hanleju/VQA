@@ -4,7 +4,7 @@ import torchvision.models as models
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class VisionEncoder_CNN(nn.Module):
+class CNN(nn.Module):
     def __init__(self, out_features=512):
         super().__init__()
 
@@ -42,7 +42,7 @@ class VisionEncoder_CNN(nn.Module):
         
         return v_seq, v_global
 
-class VisionEncoder_ResNet50(nn.Module):
+class ResNet50(nn.Module):
     """
     pretrained ResNet-50 사용
     """

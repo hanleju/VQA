@@ -1,10 +1,12 @@
 import torch.nn as nn
-from utils.fusion import Concat, Attention
+from utils.fusion import Concat, Attention, CoAttention, MFBFusion, GatedFusion
 
 class VQAModel(nn.Module):
     def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert",fusion_type="concat", hidden_dim=1024, num_classes=13):
         super().__init__()
         
+        self.fusion_type = fusion_type
+
         self.vision_encoder = vision(out_features=512)
         self.text_encoder = text(hidden_dim=512)
         
@@ -13,9 +15,19 @@ class VQAModel(nn.Module):
                 v_dim=self.vision_encoder.output_dim,
                 q_dim=self.text_encoder.output_dim
             )
+
         elif fusion_type == "attention":
-            # embed_dim = 512
             self.fusion_module = Attention(embed_dim=512, num_heads=8)
+
+        elif self.fusion_type == "co_attention":
+            self.fusion_module = CoAttention(embed_dim=512, num_heads=8)
+            
+        elif self.fusion_type == "mfb":
+            self.fusion_module = MFBFusion(embed_dim=512, output_dim=1024)
+
+        elif self.fusion_type == "gated_fusion":
+            self.fusion_module = GatedFusion(embed_dim=512, num_heads=8)
+
         else:
             raise ValueError(f"Unknown fusion type: {fusion_type}")
 

@@ -1,7 +1,7 @@
 import torch.nn as nn
 from transformers import BertModel
 
-class TextEncoder_Bert(nn.Module):
+class Bert(nn.Module):
     """
     pretrained BERT 사용
     """
