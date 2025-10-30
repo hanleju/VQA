@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,7 +6,6 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
 from transformers import BertTokenizer
 from functools import partial
-import os
 import traceback
 import argparse
 import yaml
@@ -88,7 +88,7 @@ def main():
     val_loader = DataLoader(
         dataset=val_dataset,
         batch_size=args.batch_size,
-        shuffle=False, 
+        shuffle=False,
         collate_fn=collate_fn,
         num_workers=args.num_workers,
         pin_memory=True
