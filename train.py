@@ -122,7 +122,7 @@ def main():
             train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
 
             # Validation
-            val_loss, val_acc = validate(model, val_loader, criterion, device)
+            val_loss, val_acc, metrics = validate(model, val_loader, criterion, device, mode="val")
 
             log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
             print(log_msg)

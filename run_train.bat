@@ -15,17 +15,17 @@ python train.py -c ./cfg/ResNet50_BERT_coco/mfb.yaml
 echo [INFO] ---------------------------------------------
 echo [INFO] 2. Starting Experiment: Co-Attention
 echo [INFO] ---------------------------------------------
-python train.py -c ./cfg/ResNet50_BERT_coco/co_attention.yaml
+python train.py -c ./cfg/ResNet50_BERT_coco/coattention.yaml
 
 echo [INFO] ---------------------------------------------
 echo [INFO] 3. Starting Experiment: Concat
 echo [INFO] ---------------------------------------------
 python train.py -c ./cfg/ResNet50_BERT_coco/concat.yaml
 
-@REM echo [INFO] ---------------------------------------------
-@REM echo [INFO] 3. Starting Experiment: attention
-@REM echo [INFO] ---------------------------------------------
-@REM python train.py -c ./cfg/ResNet50_BERT_coco/attention.yaml
+echo [INFO] ---------------------------------------------
+echo [INFO] 3. Starting Experiment: attention
+echo [INFO] ---------------------------------------------
+python train.py -c ./cfg/ResNet50_BERT_coco/attention.yaml
 
 echo [INFO] ---------------------------------------------
 echo [INFO] 3. Starting Experiment: gated_fusion

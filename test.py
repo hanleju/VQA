@@ -18,6 +18,7 @@ from model.model import VQAModel
 def parse_args():
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
+    p.add_argument('--weights','-w', type=str, help='path to model weights file')
     known, remaining = p.parse_known_args()
 
     cfg_from_file = {}
@@ -28,8 +29,13 @@ def parse_args():
                 cfg_from_file = yaml.safe_load(f) or {}
         else:
             raise FileNotFoundError(f"Config file not found: {known.cfg}")
+    
+    args_dict = {**cfg_from_file, 'weights': known.weights}
+    
+    if not args_dict['weights']:
+        raise ValueError("--weights/-w argument is required")
         
-    args_obj = argparse.Namespace(**cfg_from_file)
+    args_obj = argparse.Namespace(**args_dict)
     return args_obj
 
 
@@ -53,7 +59,6 @@ def main():
                                 split='test',
                                 transform=image_transform)
 
-    # 3. DataLoader 생성
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     
     test_loader = DataLoader(
@@ -76,22 +81,26 @@ def main():
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
 
-    # --- 모델, 옵티마이저, 손실함수 준비 ---
     model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
 
-    model.load_state_dict(torch.load('./checkpoints/ResNet50_BERT_attention/best_model_epoch_5_acc_100.00.pth', map_location=device))
+    model.load_state_dict(torch.load(args.weights, map_location=device))
 
     model.eval()
 
+    print(f"Model: {model.__class__.__name__}, Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type}")
+
+    mode = "test"
+
     with torch.no_grad():
-        val_loss, val_acc = validate(model, test_loader, criterion, device)
+        val_loss, val_acc, metrics = validate(model, test_loader, criterion, device, mode=mode, weight_path=args.weights)
     
     print("\n--- Test Results ---")
-    print(f"Model: {model.__class__.__name__}, Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type}")
-    print(f"Eval Loss: {val_loss:.4f}, Eval Acc: {val_acc:.2f}%")
+    print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%")
+    if 'precision' in metrics:
+        print(f"Precision: {metrics['precision']:.4f}")
+        print(f"Recall: {metrics['recall']:.4f}")
+        print(f"F1 Score: {metrics['f1']:.4f}")
 
-
-# --- 7. 스크립트 실행 ---
 if __name__ == '__main__':
     main()
