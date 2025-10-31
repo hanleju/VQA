@@ -3,6 +3,7 @@ import json
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
+from pathlib import Path
 
 class VQADataset(Dataset):
     """
@@ -89,17 +90,22 @@ class VQADataset(Dataset):
             return None # 혹은 예외 발생
 
         # 2. 이미지 로드
-        # 참고: 이미지 파일 확장자가 .png가 아닐 수 있습니다. 
-        # 실제 파일 확장자(예: .jpg)에 맞게 수정해야 할 수 있습니다.
-        image_filename = f"{image_id}.png" 
-        image_path = os.path.join(self.image_dir, image_filename)
+        image = None
+        for ext in ['.png', '.jpg', '.jpeg']:
+            image_filename = f"{image_id}{ext}"
+            image_path = os.path.join(self.image_dir, image_filename)
+            if os.path.exists(image_path):
+                try:
+                    image = Image.open(image_path).convert('RGB')
+                    break
+                except Exception as e:
+                    print(f"Warning: Failed to load {image_path}: {e}")
+                    continue
         
-        try:
-            # 
-            image = Image.open(image_path).convert('RGB')
-        except FileNotFoundError:
-            print(f"경고: 이미지 파일 {image_path}를 찾을 수 없습니다. 회색 이미지로 대체합니다.")
-            image = Image.new('RGB', (224, 224), color='grey') # Placeholder
+        # 이미지를 찾지 못했거나 로드하지 못한 경우
+        if image is None:
+            print(f"Warning: No valid image found for ID {image_id}. Using grey placeholder.")
+            image = Image.new('RGB', (224, 224), color='grey')
 
         # 3. 이미지 변환 (Transform) 적용
         if self.transform:

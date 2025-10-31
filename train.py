@@ -131,6 +131,9 @@ def main():
 
             scheduler.step()
 
+            # save_path = os.path.join(args.model_save_path, f"epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
+            # torch.save(model.state_dict(), save_path)
+            
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 save_path = os.path.join(args.model_save_path, f"best_model_epoch_{epoch+1}_acc_{val_acc:.2f}.pth")

@@ -1,39 +1,45 @@
+import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import BertTokenizer
 from functools import partial
-import os
+import argparse
+import yaml
+from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import validate
-
-from model.vision_encoder import VisionEncoder_ResNet50
-from model.text_encoder import TextEncoder_Bert
+from model.vision_encoder import CNN, ResNet50
+from model.text_encoder import Bert
 from model.model import VQAModel
 
-# --- 1. 하이퍼파라미터 및 설정 ---
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_ROOT = 'D:/VQA/easyVQA'
-NUM_CLASSES = 13  # 테스트에서 확인된 값
-BATCH_SIZE = 32   # 배치 크기 (테스트는 2였지만, 학습은 32~64 권장)
-NUM_EPOCHS = 20   # 총 학습 에포크
-LEARNING_RATE = 1e-5
-VAL_SPLIT_RATIO = 0.1 # 전체 데이터 중 10%를 검증용으로 사용
-NUM_WORKERS = 4   # 데이터 로딩 워커 수 (환경에 맞게 조절)
-MODEL_SAVE_PATH = './checkpoints' # 모델 저장 경로
-FUSION_TYPE = 'attention' # 'concat' 또는 'attention' 선택 (attention 권장)
-Vision = VisionEncoder_ResNet50
-Text = TextEncoder_Bert
+def parse_args():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
+    known, remaining = p.parse_known_args()
+
+    cfg_from_file = {}
+    if known.cfg:
+        cfg_path = Path(known.cfg)
+        if cfg_path.exists():
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg_from_file = yaml.safe_load(f) or {}
+        else:
+            raise FileNotFoundError(f"Config file not found: {known.cfg}")
+        
+    args_obj = argparse.Namespace(**cfg_from_file)
+    return args_obj
 
 
-# --- 5. 메인 실행 함수 ---
 def main():
-    print(f"Using device: {DEVICE}")
-    os.makedirs(MODEL_SAVE_PATH, exist_ok=True) # 모델 저장 폴더 생성
+    args = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    os.makedirs(args.model_save_path, exist_ok=True)
+    log_path = os.path.join(args.model_save_path, "log.txt")
 
-    # --- 데이터셋 및 로더 준비 ---
     image_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -43,7 +49,7 @@ def main():
     
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
-    test_dataset = VQADataset(root_dir=DATASET_ROOT, 
+    test_dataset = VQADataset(root_dir=args.dataset_root, 
                                 split='test',
                                 transform=image_transform)
 
@@ -52,22 +58,38 @@ def main():
     
     test_loader = DataLoader(
         dataset=test_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=NUM_WORKERS,
-        pin_memory=True # GPU 사용 시 메모리 고정
+        num_workers=args.num_workers,
+        pin_memory=True
     )
 
+    VISION_MODELS = {
+        "CNN": CNN,
+        "ResNet50": ResNet50
+    }
+    TEXT_MODELS = {
+        "Bert": Bert
+    }
+
+    vision_class = VISION_MODELS.get(args.Vision)
+    text_class = TEXT_MODELS.get(args.Text)
+
     # --- 모델, 옵티마이저, 손실함수 준비 ---
-    model = VQAModel(vision=Vision, text=Text, fusion_type=FUSION_TYPE, num_classes=NUM_CLASSES).to(DEVICE)
+    model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
 
-    model.load_state_dict(torch.load('./checkpoints/best_model.pth', map_location=DEVICE))
+    model.load_state_dict(torch.load('./checkpoints/ResNet50_BERT_attention/best_model_epoch_5_acc_100.00.pth', map_location=device))
 
-    val_loss, val_acc = validate(model, test_loader, criterion, DEVICE)
+    model.eval()
+
+    with torch.no_grad():
+        val_loss, val_acc = validate(model, test_loader, criterion, device)
     
-    print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+    print("\n--- Test Results ---")
+    print(f"Model: {model.__class__.__name__}, Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type}")
+    print(f"Eval Loss: {val_loss:.4f}, Eval Acc: {val_acc:.2f}%")
 
 
 # --- 7. 스크립트 실행 ---
