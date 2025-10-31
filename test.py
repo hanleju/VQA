@@ -98,9 +98,7 @@ def main():
     print("\n--- Test Results ---")
     print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%")
     if 'precision' in metrics:
-        print(f"Precision: {metrics['precision']:.4f}")
-        print(f"Recall: {metrics['recall']:.4f}")
-        print(f"F1 Score: {metrics['f1']:.4f}")
+        print(f"Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}, F1 Score: {metrics['f1']:.4f}")
 
 if __name__ == '__main__':
     main()

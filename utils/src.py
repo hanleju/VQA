@@ -137,13 +137,13 @@ def validate(model, val_loader, criterion, device, mode="val", weight_path=None)
         weight_name = Path(weight_path).stem
         
         # 혼동 행렬 플롯 저장
-        plt.figure(figsize=(1200, 1000))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-        plt.title(f'Confusion Matrix - {weight_name}')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.savefig(os.path.join(result_dir, f'{weight_name}_confusion_matrix.png'))
-        plt.close()
+        # plt.figure(figsize=(500, 300))
+        # sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        # plt.title(f'Confusion Matrix - {weight_name}')
+        # plt.xlabel('Predicted')
+        # plt.ylabel('True')
+        # plt.savefig(os.path.join(result_dir, f'{weight_name}_confusion_matrix.png'))
+        # plt.close()
         
         # 테스트 결과를 텍스트 파일로 저장
         with open(os.path.join(result_dir, f'{weight_name}_results.txt'), 'w') as f:
