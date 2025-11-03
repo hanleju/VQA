@@ -114,7 +114,14 @@ class BertQLoRA(nn.Module):
         self.output_dim = hidden_dim
 
     def forward(self, input_ids, attention_mask):
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        # When using PEFT wrappers, calling the wrapper's forward can sometimes
+        # inject unexpected kwargs (e.g. 'labels') into the underlying model.
+        # Calling the wrapped model's base_model.forward directly avoids that
+        # while still using the adapter-modified modules.
+        if hasattr(self.bert, 'base_model'):
+            outputs = self.bert.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        else:
+            outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         last_hidden_state = outputs.last_hidden_state
         pooler_output = getattr(outputs, 'pooler_output', None)
         if pooler_output is None:
@@ -153,7 +160,10 @@ class RoBertaQLoRA(nn.Module):
         self.output_dim = hidden_dim
 
     def forward(self, input_ids, attention_mask):
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        if hasattr(self.bert, 'base_model'):
+            outputs = self.bert.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        else:
+            outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         last_hidden_state = outputs.last_hidden_state
         pooler_output = getattr(outputs, 'pooler_output', None)
         if pooler_output is None:
