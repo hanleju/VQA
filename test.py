@@ -12,7 +12,7 @@ from pathlib import Path
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import validate
 from model.vision_encoder import CNN, ResNet50, SwinTransformer
-from model.text_encoder import Bert, RoBerta
+from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
 from model.model import VQAModel
 
 def parse_args():
@@ -77,9 +77,10 @@ def main():
     }
     TEXT_MODELS = {
         "Bert": Bert,
-        "RoBerta": RoBerta
+        "RoBerta": RoBerta,
+        "BertQLoRA": BertQLoRA, 
+        "RoBertaQLoRA": RoBertaQLoRA
     }
-
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
 

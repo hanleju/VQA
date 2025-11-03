@@ -22,7 +22,6 @@ def calc_accuracy(preds, labels):
     correct_count = (pred_indices == labels).sum().item()
     return correct_count
 
-# --- 3. 1 에포크 학습 함수 ---
 def train(model, train_loader, optimizer, criterion, device):
     model.train() # 모델을 학습 모드로 설정 (Dropout, BatchNorm 활성화)
     

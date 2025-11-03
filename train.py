@@ -18,6 +18,8 @@ from model.vision_encoder import CNN, ResNet50, SwinTransformer
 from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
 from model.model import VQAModel
 
+torch.manual_seed(42)
+
 def parse_args():
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
@@ -111,13 +113,16 @@ def main():
     text_class = TEXT_MODELS.get(args.Text)
 
     model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     print(f"Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type} \n Start Train...")
     
     best_val_acc = 0.0
+    patience = 5  # 5 에포크 동안 Val Acc가 개선되지 않으면 중단
+    patience_counter = 0
+    best_model_save_path = os.path.join(args.model_save_path, "best_model.pth")
 
     with open(log_path, "w") as log_file:
         for epoch in range(args.epochs):
@@ -143,7 +148,15 @@ def main():
                 best_val_acc = val_acc
                 save_path = os.path.join(args.model_save_path, f"best_model_epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
                 torch.save(model.state_dict(), save_path)
+                torch.save(model.state_dict(), best_model_save_path)
                 print(f"New Best Model: {save_path}")
+                patience_counter = 0  # Reset counter if validation accuracy improves
+            else:
+                patience_counter += 1
+            
+            if patience_counter >= patience:
+                print(f"No improvement in validation accuracy for {patience} consecutive epochs. Early stopping.")
+                break
 
     print(f"\n--- Train End ---")
     print(f"Best Validation ACC: {best_val_acc:.2f}%")
