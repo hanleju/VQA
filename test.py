@@ -11,8 +11,8 @@ from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import validate
-from model.vision_encoder import CNN, ResNet50
-from model.text_encoder import Bert
+from model.vision_encoder import CNN, ResNet50, SwinTransformer
+from model.text_encoder import Bert, RoBerta
 from model.model import VQAModel
 
 def parse_args():
@@ -72,10 +72,12 @@ def main():
 
     VISION_MODELS = {
         "CNN": CNN,
-        "ResNet50": ResNet50
+        "ResNet50": ResNet50,
+        "SwinTransformer": SwinTransformer
     }
     TEXT_MODELS = {
-        "Bert": Bert
+        "Bert": Bert,
+        "RoBerta": RoBerta
     }
 
     vision_class = VISION_MODELS.get(args.Vision)
@@ -95,10 +97,10 @@ def main():
     with torch.no_grad():
         val_loss, val_acc, metrics = validate(model, test_loader, criterion, device, mode=mode, weight_path=args.weights)
     
-    print("\n--- Test Results ---")
-    print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%")
+    print("--- Test Results ---")
+    print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%\n")
     if 'precision' in metrics:
-        print(f"Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}, F1 Score: {metrics['f1']:.4f}")
+        print(f"Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}, F1 Score: {metrics['f1']:.4f}\n")
 
 if __name__ == '__main__':
     main()

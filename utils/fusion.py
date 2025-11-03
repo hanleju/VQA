@@ -84,45 +84,6 @@ class CoAttention(nn.Module):
         fused = torch.cat([attended_v, attended_q], dim=1) # (B, 1024)
         return fused
 
-
-class MFBFusion(nn.Module):
-    """(2) Multimodal Factorized Bilinear Pooling (MFB)"""
-    def __init__(self, embed_dim=512, k_factor=5, output_dim=1024, dropout_prob=0.1):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.k_factor = k_factor
-        self.output_dim = output_dim # VQA 모델의 concat (512*2)와 맞춤
-
-        # 1. 각 모달리티를 (output_dim * k_factor) 차원으로 확장
-        self.v_proj = nn.Linear(embed_dim, output_dim * k_factor)
-        self.q_proj = nn.Linear(embed_dim, output_dim * k_factor)
-        
-        self.dropout = nn.Dropout(dropout_prob)
-        # self.output_dim은 VQAModel의 classifier 입력 차원과 일치해야 함
-
-    def forward(self, v_seq, v_global, q_seq, q_global):
-        # 이 모듈은 전역 특징(v_global, q_global)만 사용합니다.
-        # v_seq와 q_seq는 사용되지 않습니다.
-        
-        # 1. 프로젝션
-        v_proj = self.v_proj(v_global) # (B, output_dim * k)
-        q_proj = self.q_proj(q_global) # (B, output_dim * k)
-        
-        # 2. Hadamard product (element-wise 곱)
-        fused_vq = v_proj * q_proj
-        fused_vq = self.dropout(fused_vq)
-        
-        # 3. Sum pooling (Factorized Bilinear Pooling)
-        # (B, output_dim * k) -> (B, output_dim, k)
-        fused_vq = fused_vq.view(-1, self.output_dim, self.k_factor)
-        fused_vq = fused_vq.sum(dim=-1) # (B, output_dim)
-        
-        # 4. 정규화 (Power-L2)
-        fused_vq = torch.sqrt(F.relu(fused_vq)) - torch.sqrt(F.relu(-fused_vq))
-        fused_vq = F.normalize(fused_vq, p=2, dim=1) # L2 Norm
-        
-        return fused_vq # (B, 1024)
-
 class GatedFusion(nn.Module):
     """(3) Gated Fusion (기존 Attention 모듈에 Gating 적용)"""
     def __init__(self, embed_dim=512, num_heads=8):

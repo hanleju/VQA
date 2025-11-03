@@ -1,20 +1,21 @@
 import os
+import yaml
+import traceback
+import argparse
+from pathlib import Path
+from functools import partial
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
 from transformers import BertTokenizer
-from functools import partial
-import traceback
-import argparse
-import yaml
-from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import train, validate
-from model.vision_encoder import CNN, ResNet50
-from model.text_encoder import Bert
+from model.vision_encoder import CNN, ResNet50, SwinTransformer
+from model.text_encoder import Bert, RoBerta
 from model.model import VQAModel
 
 def parse_args():
@@ -96,10 +97,12 @@ def main():
 
     VISION_MODELS = {
         "CNN": CNN,
-        "ResNet50": ResNet50
+        "ResNet50": ResNet50,
+        "SwinTransformer": SwinTransformer
     }
     TEXT_MODELS = {
-        "Bert": Bert
+        "Bert": Bert,
+        "RoBerta": RoBerta
     }
 
     vision_class = VISION_MODELS.get(args.Vision)

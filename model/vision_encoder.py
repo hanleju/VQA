@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from transformers import SwinModel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -75,5 +76,66 @@ class ResNet50(nn.Module):
         
         projected_map = self.seq_projection(feature_map)
         v_seq = projected_map.flatten(2).permute(0, 2, 1) # (B, 49, 512)
+        
+        return v_seq, v_global
+    
+
+class SwinTransformer(nn.Module):
+    """
+    pretrained Swin Transformer-Tiny (Hugging Face) 사용
+    
+    ResNet50 인코더와 동일한 인터페이스를 갖도록 구현:
+    - forward(images)
+    - 반환값: v_seq (B, 49, 512), v_global (B, 512)
+    """
+    def __init__(self, 
+                 model_name='microsoft/swin-tiny-patch4-window7-224', 
+                 out_features=512):
+        """
+        model_name: Hugging Face Hub의 Swin Transformer 모델 ID
+        out_features: VQAModel과 맞출 최종 출력 차원 (512)
+        """
+        super().__init__()
+
+        # 1. Pretrained Swin Transformer 모델 로드
+        self.swin = SwinModel.from_pretrained(model_name)
+        
+        # 2. Swin 모델의 기본 출력 차원 확인
+        # (예: 'swin-base'의 경우 768)
+        swin_output_dim = self.swin.config.hidden_size 
+        
+        # 3. VQAModel의 'out_features'(512)에 맞게 차원 매핑
+        # Swin (768) -> VQA (512)
+        self.seq_projection = nn.Linear(swin_output_dim, out_features)
+        self.global_projection = nn.Linear(swin_output_dim, out_features)
+        
+        self.output_dim = out_features
+
+    def forward(self, images):
+        """
+        images: (B, 3, 224, 224) 텐서 (데이터 로더에서 transform 거침)
+        """
+        
+        # 1. Swin Transformer 실행
+        # (images는 HF에서 'pixel_values'로 명명됨)
+        outputs = self.swin(pixel_values=images)
+        
+        # 2. 특징 추출
+        # (B, 49, 768) - 'swin-base' 기준
+        # (7x7 그리드의 49개 패치 특징 시퀀스)
+        last_hidden_state = outputs.last_hidden_state 
+        
+        # (B, 768) - 'swin-base' 기준
+        # (시퀀스 전체를 평균 풀링한 [CLS] 토큰 격의 전역 특징)
+        pooler_output = outputs.pooler_output
+        
+        # 3. Projection Layer
+        # ResNet50과 동일한 인터페이스로 가공
+        
+        # (B, 49, 768) -> (B, 49, 512)
+        v_seq = self.seq_projection(last_hidden_state)
+        
+        # (B, 768) -> (B, 512)
+        v_global = self.global_projection(pooler_output)
         
         return v_seq, v_global
