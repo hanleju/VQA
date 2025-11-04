@@ -3,7 +3,6 @@ import json
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
-from pathlib import Path
 
 class VQADataset(Dataset):
     """
@@ -30,13 +29,11 @@ class VQADataset(Dataset):
         self.split = split
         self.transform = transform
         
-        # 1. 경로 설정
         self.data_dir = os.path.join(root_dir, split)
         self.json_path = os.path.join(self.data_dir, 'questions.json')
         self.image_dir = os.path.join(self.data_dir, 'images')
         self.label_path = os.path.join(root_dir, 'labels.txt')
 
-        # 2. questions.json 로드
         try:
             with open(self.json_path, 'r', encoding='utf-8') as f:
                 self.annotations = json.load(f)
@@ -79,17 +76,12 @@ class VQADataset(Dataset):
                     'answer': 답변 인덱스(tensor) }
         """
         
-        # 1. 어노테이션 정보 추출 (question, answer_str, image_id)
         try:
             question_text, answer_text, image_id = self.annotations[idx]
         except (IndexError, ValueError) as e:
             print(f"오류: 인덱스 {idx}의 어노테이션을 파싱하는 데 실패했습니다. {e}")
-            # 유효하지 않은 인덱스에 대해 빈 샘플이나 None을 반환할 수 있습니다.
-            # 여기서는 첫 번째 샘플을 대신 반환하거나 예외를 발생시킬 수 있습니다.
-            # 간단하게 None을 처리할 수 있도록 None을 반환합니다. (collate_fn에서 처리 필요)
-            return None # 혹은 예외 발생
+            return None
 
-        # 2. 이미지 로드
         image = None
         for ext in ['.png', '.jpg', '.jpeg']:
             image_filename = f"{image_id}{ext}"
@@ -102,36 +94,26 @@ class VQADataset(Dataset):
                     print(f"Warning: Failed to load {image_path}: {e}")
                     continue
         
-        # 이미지를 찾지 못했거나 로드하지 못한 경우
         if image is None:
             print(f"Warning: No valid image found for ID {image_id}. Using grey placeholder.")
             image = Image.new('RGB', (224, 224), color='grey')
 
-        # 3. 이미지 변환 (Transform) 적용
         if self.transform:
             image = self.transform(image)
 
-        # 4. 답변(answer_text)을 정수 인덱스(tensor)로 변환
         answer_idx = self.answer_to_idx.get(answer_text, -1) # labels.txt에 없는 답변은 -1 처리
         
         if answer_idx == -1:
              print(f"경고: 답변 '{answer_text}'를 labels.txt에서 찾을 수 없습니다.")
-             # VQA는 보통 분류 문제로 접근하므로, CrossEntropyLoss의 
-             # ignore_index=-100을 사용하거나, 0번 인덱스(예: 'unknown')를 사용할 수 있습니다.
-             # 여기서는 -1을 그대로 두고, 손실 함수에서 ignore_index=-1로 설정한다고 가정합니다.
-        
+
         answer_tensor = torch.tensor(answer_idx, dtype=torch.long)
 
-        # 5. 샘플을 딕셔너리 형태로 반환
-        # 질문(question_text)은 collate_fn에서 리스트로 묶인 후, 
-        # 모델의 forward pass 직전에 tokenizer로 처리됩니다.
         return {
             'image': image,
             'question': question_text,
             'answer': answer_tensor
         }
 
-# --- DataLoader를 위한 Custom Collate Function ---
 def collate_fn_with_tokenizer(batch, tokenizer):
     """
     Collate_fn 내부에서 토큰화까지 수행합니다.
@@ -144,12 +126,9 @@ def collate_fn_with_tokenizer(batch, tokenizer):
     questions = [item['question'] for item in batch]
     answers = [item['answer'] for item in batch]
 
-    # 이미지와 답변은 스택
     batch_images = torch.stack(images, dim=0)
     batch_answers = torch.stack(answers, dim=0)
     
-    # 
-    # 질문(텍스트 리스트)을 여기서 바로 토큰화 (동적 패딩)
     tokenized_inputs = tokenizer(
         questions, 
         padding='longest',  # 배치 내 최대 길이로 패딩
@@ -160,6 +139,6 @@ def collate_fn_with_tokenizer(batch, tokenizer):
     
     return {
         'image': batch_images,
-        'inputs': tokenized_inputs, # input_ids, attention_mask 등이 담긴 딕셔너리
+        'inputs': tokenized_inputs,
         'answer': batch_answers
     }

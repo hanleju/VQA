@@ -20,14 +20,14 @@ class Bert(nn.Module):
         
         self.bert = BertModel.from_pretrained(model_name)
         
-        # 2. (bert-base-uncased dim = 768
+        # bert-base-uncased dim = 768
         bert_output_dim = self.bert.config.hidden_size # 768
         
-        # 3. (선택 사항) BERT dim hidden_dim mapping
+        # BERT dim hidden_dim mapping
         self.seq_projection = nn.Linear(bert_output_dim, hidden_dim)
         self.global_projection = nn.Linear(bert_output_dim, hidden_dim)
         
-        self.output_dim = hidden_dim # 최종 출력 차원: 512
+        self.output_dim = hidden_dim # 512
 
     def forward(self, input_ids, attention_mask):
         """
@@ -39,9 +39,9 @@ class Bert(nn.Module):
                             attention_mask=attention_mask)
         
         last_hidden_state = outputs.last_hidden_state # (B, L, 768)
-        pooler_output = outputs.pooler_output     # (B, 768) [CLS] 토큰의 특징
+        pooler_output = outputs.pooler_output     # (B, 768) [CLS] 토큰
         
-        # 3. Projection Layer
+        # Projection Layer
         q_seq = self.seq_projection(last_hidden_state)     # (B, L, 512)
         q_global = self.global_projection(pooler_output) # (B, 512)
         
@@ -58,14 +58,14 @@ class RoBerta(nn.Module):
         
         self.bert = RobertaModel.from_pretrained(model_name)
         
-        # 2. (bert-base-uncased dim = 768
+        # roberta-base dim = 768
         bert_output_dim = self.bert.config.hidden_size # 768
         
-        # 3. (선택 사항) BERT dim hidden_dim mapping
+        # RoBerta dim hidden_dim mapping
         self.seq_projection = nn.Linear(bert_output_dim, hidden_dim)
         self.global_projection = nn.Linear(bert_output_dim, hidden_dim)
         
-        self.output_dim = hidden_dim # 최종 출력 차원: 512
+        self.output_dim = hidden_dim # 512
 
     def forward(self, input_ids, attention_mask):
         """
@@ -77,10 +77,10 @@ class RoBerta(nn.Module):
                             attention_mask=attention_mask)
         
         last_hidden_state = outputs.last_hidden_state # (B, L, 768)
-        pooler_output = outputs.pooler_output     # (B, 768) [CLS] 토큰의 특징
+        pooler_output = outputs.pooler_output     # (B, 768) [CLS] 토큰
         
-        # 3. Projection Layer
-        q_seq = self.seq_projection(last_hidden_state)     # (B, L, 512)
+        # Projection Layer
+        q_seq = self.seq_projection(last_hidden_state)   # (B, L, 512)
         q_global = self.global_projection(pooler_output) # (B, 512)
         
         return q_seq, q_global
@@ -114,10 +114,6 @@ class BertQLoRA(nn.Module):
         self.output_dim = hidden_dim
 
     def forward(self, input_ids, attention_mask):
-        # When using PEFT wrappers, calling the wrapper's forward can sometimes
-        # inject unexpected kwargs (e.g. 'labels') into the underlying model.
-        # Calling the wrapped model's base_model.forward directly avoids that
-        # while still using the adapter-modified modules.
         if hasattr(self.bert, 'base_model'):
             outputs = self.bert.base_model(input_ids=input_ids, attention_mask=attention_mask)
         else:
@@ -125,7 +121,6 @@ class BertQLoRA(nn.Module):
         last_hidden_state = outputs.last_hidden_state
         pooler_output = getattr(outputs, 'pooler_output', None)
         if pooler_output is None:
-            # fallback: use CLS token embedding
             pooler_output = last_hidden_state[:, 0, :]
 
         q_seq = self.seq_projection(last_hidden_state)

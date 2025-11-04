@@ -53,7 +53,9 @@ def parse_args():
     return args_obj
 
 def get_confidence_and_pred(outputs):
-    """소프트맥스 출력에서 confidence(최대 확률)와 예측 클래스를 반환"""
+    """
+    소프트맥스 출력에서 confidence(최대 확률)와 예측 클래스를 반환
+    """
     probs = torch.softmax(outputs, dim=1)
     confidence, predictions = torch.max(probs, dim=1)
     return confidence, predictions
@@ -61,7 +63,8 @@ def get_confidence_and_pred(outputs):
 # entropy/loss removed — attack uses confidence only
 
 def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True):
-    """데이터셋에 대한 confidence 계산 (entropy/loss removed)
+    """
+    데이터셋에 대한 confidence 계산 (entropy/loss removed)
     Returns dict with confidences, ground_truth and predictions (by threshold).
     """
     model.eval()
@@ -81,11 +84,9 @@ def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True):
                 attention_mask=inputs['attention_mask']
             )
 
-            # Confidence 계산
             batch_confidence, _ = get_confidence_and_pred(outputs)
             confidences.extend(batch_confidence.cpu().numpy())
 
-            # Membership 예측 (confidence threshold 기반)
             pred_member = batch_confidence.cpu().numpy() >= threshold
             predictions.extend(pred_member)
             ground_truth.extend([1 if is_member else 0] * len(images))
@@ -97,10 +98,11 @@ def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True):
     }
 
 def plot_distributions(member_results, nonmember_results, save_dir):
-    """멤버/논멤버 데이터의 confidence 분포 시각화 (confidence only)"""
+    """
+    member/nonmember data confidence distribution visualization (confidence only)
+    """
     os.makedirs(save_dir, exist_ok=True)
 
-    # Confidence 분포
     plt.figure(figsize=(10, 6))
     sns.kdeplot(member_results['confidences'], label='Member')
     sns.kdeplot(nonmember_results['confidences'], label='Non-member')
@@ -115,13 +117,11 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    
-    # 결과 저장 디렉토리 설정
+
     weight_name = Path(args.weights).stem
     result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', weight_name)
     os.makedirs(result_dir, exist_ok=True)
     
-    # 데이터 transform 설정
     image_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -131,7 +131,6 @@ def main():
     
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
-    # 데이터 로드
     full_train_dataset = VQADataset(
         root_dir=args.dataset_root,
         split='train',
@@ -144,19 +143,16 @@ def main():
         transform=image_transform
     )
 
-    # train/val split을 train.py와 동일하게 재현 (같은 seed 사용)
     total_size = len(full_train_dataset)
     val_size = int(total_size * getattr(args, 'val_split_ratio', 0.1))
     train_size = total_size - val_size
 
-    # reproducible split (train.py had torch.manual_seed(42))
     g = torch.Generator()
     g.manual_seed(42)
     train_dataset, _ = random_split(full_train_dataset, [train_size, val_size], generator=g)
     
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     
-    # train_loader/test_loader: sample both sides to the same size (match the smaller set)
     train_len = len(train_dataset)
     test_len = len(test_dataset)
     desired = min(train_len, test_len)
@@ -164,7 +160,6 @@ def main():
     g2 = torch.Generator()
     g2.manual_seed(42)
 
-    # downsample train_dataset if needed
     if train_len > desired:
         perm_train = torch.randperm(train_len, generator=g2)
         train_indices = perm_train[:desired].tolist()
@@ -172,7 +167,6 @@ def main():
     else:
         train_subset = train_dataset
 
-    # downsample test_dataset if needed
     if test_len > desired:
         perm_test = torch.randperm(test_len, generator=g2)
         test_indices = perm_test[:desired].tolist()
@@ -198,7 +192,6 @@ def main():
         pin_memory=True
     )
     
-    # 모델 생성 및 가중치 로드
     VISION_MODELS = {
         "CNN": CNN,
         "ResNet50": ResNet50,
@@ -235,10 +228,9 @@ def main():
         threshold=args.threshold, is_member=False
     )
 
-    # 결과 시각화 (confidence distribution)
+    # visualization
     plot_distributions(member_results, nonmember_results, result_dir)
 
-    # 통합된 score / label 배열 생성 (member=1, non-member=0)
     scores_member = member_results['confidences']
     scores_nonmember = nonmember_results['confidences']
     scores = np.concatenate([scores_member, scores_nonmember])
@@ -271,7 +263,6 @@ def main():
     except Exception:
         pr_auc = None
 
-    # 임계값에서의 예측 및 혼동행렬
     preds_at_thresh = (scores >= args.threshold).astype(int)
     cm = confusion_matrix(labels, preds_at_thresh)
     plt.figure(figsize=(4, 4))
@@ -280,13 +271,11 @@ def main():
     plt.savefig(os.path.join(result_dir, f'confusion_at_{args.threshold:.2f}.png'))
     plt.close()
 
-    # 메트릭 계산 (threshold 기반)
     accuracy = accuracy_score(labels, preds_at_thresh)
     precision = precision_score(labels, preds_at_thresh, zero_division=0)
     recall = recall_score(labels, preds_at_thresh, zero_division=0)
     f1 = f1_score(labels, preds_at_thresh, zero_division=0)
 
-    # 결과 저장
     with open(os.path.join(result_dir, 'privacy_metrics.txt'), 'w') as f:
         f.write(f"Privacy Analysis Results for {weight_name}\n")
         f.write("-" * 50 + "\n")

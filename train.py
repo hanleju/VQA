@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
-from transformers import BertTokenizer
+from transformers import BertTokenizer, RobertaTokenizer
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import train, validate
@@ -44,7 +44,6 @@ def main():
     os.makedirs(args.model_save_path, exist_ok=True)
     log_path = os.path.join(args.model_save_path, "log.txt")
 
-    # --- 데이터셋 및 로더 준비 ---
     image_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -54,20 +53,7 @@ def main():
     
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
-    # DataLoad
-    try:
-        full_dataset = VQADataset(root_dir=args.dataset_root, 
-                                  split='train', 
-                                  transform=image_transform)
-
-        # (num_classes가 일치하는지 재확인)
-        assert full_dataset.num_answers == args.num_classes, \
-            f"num_classes({args.num_classes})가 데이터셋의 답변 수({full_dataset.num_answers})와 일치하지 않습니다."
-
-    except Exception as e:
-        print(f"데이터셋 로드 중 오류 발생: {e}")
-        traceback.print_exc()
-        return
+    full_dataset = VQADataset(root_dir=args.dataset_root, split='train', transform=image_transform)
 
     total_size = len(full_dataset)
     val_size = int(total_size * args.val_split_ratio)
@@ -141,22 +127,20 @@ def main():
 
             scheduler.step()
 
-            # save_path = os.path.join(args.model_save_path, f"epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
-            # torch.save(model.state_dict(), save_path)
+            save_path = os.path.join(args.model_save_path, f"epoch_{epoch+1}.pth")
+            torch.save(model.state_dict(), save_path)
             
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                save_path = os.path.join(args.model_save_path, f"best_model_epoch_{epoch+1}_acc_{val_acc:.2f}.pth")
-                torch.save(model.state_dict(), save_path)
                 torch.save(model.state_dict(), best_model_save_path)
                 print(f"New Best Model: {save_path}")
-                patience_counter = 0  # Reset counter if validation accuracy improves
-            else:
-                patience_counter += 1
+            #     patience_counter = 0  # Reset counter if validation accuracy improves
+            # else:
+            #     patience_counter += 1
             
-            if patience_counter >= patience:
-                print(f"No improvement in validation accuracy for {patience} consecutive epochs. Early stopping.")
-                break
+            # if patience_counter >= patience:
+            #     print(f"No improvement in validation accuracy for {patience} consecutive epochs. Early stopping.")
+            #     break
 
     print(f"\n--- Train End ---")
     print(f"Best Validation ACC: {best_val_acc:.2f}%")
