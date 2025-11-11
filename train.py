@@ -13,10 +13,10 @@ from torchvision import transforms
 from transformers import BertTokenizer, RobertaTokenizer
 
 from data.data import VQADataset, collate_fn_with_tokenizer
-from utils.src import train, validate
+from utils.src import train, validate, train_epoch_ib, validate_ib
 from model.vision_encoder import CNN, ResNet50, SwinTransformer
 from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
-from model.model import VQAModel
+from model.model import VQAModel, VQAModel_IB
 
 torch.manual_seed(42)
 
@@ -98,7 +98,15 @@ def main():
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
 
-    model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
+    if args.model == "VQAModel":
+        model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
+    elif args.model == "VQAModel_IB":
+        model = VQAModel_IB(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes, 
+                            bottleneck_dim=getattr(args, 'bottleneck_dim', 256), 
+                            beta=getattr(args, 'beta', 0.1)).to(device)
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
+    
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss()
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
@@ -114,13 +122,25 @@ def main():
         for epoch in range(args.epochs):
             print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
 
-            # Train
-            train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
+            if args.model == "VQAModel":
+                # Train
+                train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
 
-            # Validation
-            val_loss, val_acc, metrics = validate(model, val_loader, criterion, device, mode="val")
+                # Validation
+                val_loss, val_acc, metrics = validate(model, val_loader, criterion, device, mode="val")
 
-            log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
+                log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
+                
+            elif args.model == "VQAModel_IB":
+                # Train
+                lambda_ib = getattr(args, 'lambda_ib', 0.01)
+                train_loss, train_acc = train_epoch_ib(model, train_loader, optimizer, criterion, device, lambda_ib=lambda_ib)
+
+                # Validation
+                val_acc, val_loss = validate_ib(model, val_loader, criterion, device)
+
+                log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
+            
             print(log_msg)
             log_file.write(log_msg + "\n")
             log_file.flush()

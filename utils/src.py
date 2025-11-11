@@ -142,3 +142,120 @@ def validate(model, val_loader, criterion, device, mode="val", weight_path=None)
         })
     
     return avg_loss, avg_acc, metrics
+
+
+def train_epoch_ib(model, train_loader, optimizer, criterion, device, lambda_ib=0.01):
+    """
+    Information Bottleneck을 적용하여 한 에포크 학습
+    
+    Args:
+        model: VQAModel_IB 모델
+        train_loader: 학습 데이터 로더
+        optimizer: 옵티마이저
+        criterion: 손실 함수
+        device: GPU/CPU 디바이스
+        lambda_ib: IB 손실의 가중치 (클수록 정보 압축이 강함)
+    
+    Returns:
+        epoch_loss: 에포크 전체 손실
+        epoch_acc: 에포크 정확도
+    """
+    model.train()
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+    
+    train_pbar = tqdm(train_loader, desc="Training IB", leave=False)
+    
+    for batch in train_pbar:
+        images = batch['image'].to(device)
+        inputs = batch['inputs'].to(device)
+        answers = batch['answer'].to(device)
+        
+        optimizer.zero_grad()
+        
+        # Forward pass
+        logits, aux_dict = model(
+            images=images,
+            input_ids=inputs['input_ids'],
+            attention_mask=inputs['attention_mask']
+        )
+        
+        # 분류 손실
+        ce_loss = criterion(logits, answers)
+        
+        # Information Bottleneck 손실
+        ib_losses = model.get_ib_loss(aux_dict)
+        ib_loss = ib_losses['ib_loss']
+        
+        # 전체 손실 = 분류 손실 + lambda_ib * IB 손실
+        total_ce_loss = ce_loss + lambda_ib * ib_loss
+        
+        total_ce_loss.backward()
+        optimizer.step()
+        
+        total_loss += total_ce_loss.item() * images.size(0)
+        total_correct += calc_accuracy(logits, answers)
+        total_samples += images.size(0)
+        
+        train_pbar.set_postfix(
+            ce_loss=f"{ce_loss.item():.4f}",
+            kl_loss=f"{ib_losses['kl_loss'].item():.4f}",
+            recon_loss=f"{ib_losses['reconstruction_loss'].item():.4f}"
+        )
+    
+    epoch_loss = total_loss / total_samples
+    epoch_acc = (total_correct / total_samples) * 100
+    
+    return epoch_loss, epoch_acc
+
+
+def validate_ib(model, val_loader, criterion, device):
+    """
+    Information Bottleneck 모델 검증
+    
+    Args:
+        model: VQAModel_IB 모델
+        val_loader: 검증 데이터 로더
+        criterion: 손실 함수
+        device: GPU/CPU 디바이스
+    
+    Returns:
+        val_acc: 검증 정확도 (%)
+        val_loss: 검증 손실
+    """
+    model.eval()
+    total_acc = 0.0
+    total_loss = 0.0
+    total_samples = 0
+    
+    val_pbar = tqdm(val_loader, desc="Validating IB", leave=False)
+    
+    with torch.no_grad():
+        for batch in val_pbar:
+            images = batch['image'].to(device)
+            inputs = batch['inputs'].to(device)
+            answers = batch['answer'].to(device)
+            
+            # Forward pass
+            logits, aux_dict = model(
+                images=images,
+                input_ids=inputs['input_ids'],
+                attention_mask=inputs['attention_mask']
+            )
+            
+            # 손실 계산
+            ce_loss = criterion(logits, answers)
+            total_loss += ce_loss.item() * images.size(0)
+            
+            # 정확도 계산
+            total_correct = calc_accuracy(logits, answers)
+            total_acc += total_correct
+            total_samples += images.size(0)
+            
+            val_pbar.set_postfix(loss=f"{ce_loss.item():.4f}")
+    
+    val_acc = (total_acc / total_samples) * 100
+    avg_loss = total_loss / total_samples
+    
+    return val_acc, avg_loss

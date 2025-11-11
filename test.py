@@ -10,10 +10,10 @@ import yaml
 from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
-from utils.src import validate
+from utils.src import validate, validate_ib
 from model.vision_encoder import CNN, ResNet50, SwinTransformer
 from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
-from model.model import VQAModel
+from model.model import VQAModel, VQAModel_IB
 
 def parse_args():
     p = argparse.ArgumentParser(add_help=False)
@@ -84,7 +84,15 @@ def main():
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
 
-    model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
+    if args.model == "VQAModel":
+        model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
+    elif args.model == "VQAModel_IB":
+        model = VQAModel_IB(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes, 
+                            bottleneck_dim=getattr(args, 'bottleneck_dim', 256), 
+                            beta=getattr(args, 'beta', 0.1)).to(device)
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
+    
     criterion = nn.CrossEntropyLoss()
 
     model.load_state_dict(torch.load(args.weights, map_location=device))
@@ -96,7 +104,11 @@ def main():
     mode = "test"
 
     with torch.no_grad():
-        val_loss, val_acc, metrics = validate(model, test_loader, criterion, device, mode=mode, weight_path=args.weights)
+        if args.model == "VQAModel":
+            val_loss, val_acc, metrics = validate(model, test_loader, criterion, device, mode=mode, weight_path=args.weights)
+        elif args.model == "VQAModel_IB":
+            val_acc, val_loss = validate_ib(model, test_loader, criterion, device)
+            metrics = {'loss': val_loss, 'accuracy': val_acc}
     
     print("--- Test Results ---")
     print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%\n")
