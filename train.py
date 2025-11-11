@@ -106,7 +106,7 @@ def main():
     print(f"Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type} \n Start Train...")
     
     best_val_acc = 0.0
-    patience = 5  # 5 에포크 동안 Val Acc가 개선되지 않으면 중단
+    patience = 7  # 5 에포크 동안 Val Acc가 개선되지 않으면 중단
     patience_counter = 0
     best_model_save_path = os.path.join(args.model_save_path, "best_model.pth")
 
@@ -134,13 +134,13 @@ def main():
                 best_val_acc = val_acc
                 torch.save(model.state_dict(), best_model_save_path)
                 print(f"New Best Model: {save_path}")
-            #     patience_counter = 0  # Reset counter if validation accuracy improves
-            # else:
-            #     patience_counter += 1
+                patience_counter = 0  # Reset counter if validation accuracy improves
+            else:
+                patience_counter += 1
             
-            # if patience_counter >= patience:
-            #     print(f"No improvement in validation accuracy for {patience} consecutive epochs. Early stopping.")
-            #     break
+            if patience_counter >= patience:
+                print(f"No improvement in validation accuracy for {patience} consecutive epochs. Early stopping.")
+                break
 
     print(f"\n--- Train End ---")
     print(f"Best Validation ACC: {best_val_acc:.2f}%")

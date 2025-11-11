@@ -9,3 +9,5 @@ checkpoints/
 
 *.yaml
 *.bat
+
+examples/
