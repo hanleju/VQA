@@ -3,6 +3,10 @@ import yaml
 from pathlib import Path
 import torch
 
+from model.vision_encoder import CNN, ResNet50, SwinTransformer
+from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
+from model.model import VQAModel, VQAModel_IB
+
 def parse_args():
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
@@ -30,9 +34,6 @@ def parse_args():
 # Model registry - 모델 추가 시 여기에만 등록하면 됨
 def get_model_registry():
     """모델 레지스트리 반환 - import 순환 문제 해결을 위한 lazy loading"""
-    from model.vision_encoder import CNN, ResNet50, SwinTransformer
-    from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
-    from model.model import VQAModel, VQAModel_IB
     
     VISION_MODELS = {
         "CNN": CNN,
