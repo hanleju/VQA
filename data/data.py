@@ -33,6 +33,8 @@ class VQADataset(Dataset):
         self.json_path = os.path.join(self.data_dir, 'questions.json')
         self.image_dir = os.path.join(self.data_dir, 'images')
         self.label_path = os.path.join(root_dir, 'labels.txt')
+        self.sensitive_path_split = os.path.join(self.data_dir, 'sensitive.json')
+        self.sensitive_path_root = os.path.join(root_dir, 'sensitive.json')
 
         try:
             with open(self.json_path, 'r', encoding='utf-8') as f:
@@ -61,6 +63,23 @@ class VQADataset(Dataset):
         if self.num_answers > 0:
              print(f"Data sample: {len(self.annotations)}, Label: {self.num_answers}.")
 
+        # 4. Optional 민감 레이블 로드 (존재 시 사용)
+        # 우선순위: split 폴더의 sensitive.json -> root의 sensitive.json
+        # 포맷 예시: {"0": 1, "1": 0, ...}  또는  {"0001": 2, ...}
+        self.sensitive_map = None
+        if os.path.exists(self.sensitive_path_split):
+            try:
+                with open(self.sensitive_path_split, 'r', encoding='utf-8') as f:
+                    self.sensitive_map = json.load(f)
+            except Exception as e:
+                print(f"경고: {self.sensitive_path_split} 로부터 민감 레이블을 로드하지 못했습니다: {e}")
+        elif os.path.exists(self.sensitive_path_root):
+            try:
+                with open(self.sensitive_path_root, 'r', encoding='utf-8') as f:
+                    self.sensitive_map = json.load(f)
+            except Exception as e:
+                print(f"경고: {self.sensitive_path_root} 로부터 민감 레이블을 로드하지 못했습니다: {e}")
+
 
     def __len__(self):
         """데이터셋의 총 샘플 수를 반환합니다."""
@@ -71,9 +90,12 @@ class VQADataset(Dataset):
         주어진 인덱스(idx)에 해당하는 샘플 1개를 불러옵니다.
         
         반환값:
-            dict: { 'image': 이미지 텐서, 
-                    'question': 질문 텍스트(string), 
-                    'answer': 답변 인덱스(tensor) }
+            dict: {
+                'image': 이미지 텐서,
+                'question': 질문 텍스트(string),
+                'answer': 답변 인덱스(tensor),
+                'sensitive': 민감 레이블 텐서(int) 또는 -1(없음)
+            }
         """
         
         try:
@@ -108,10 +130,31 @@ class VQADataset(Dataset):
 
         answer_tensor = torch.tensor(answer_idx, dtype=torch.long)
 
+        # 민감 레이블: 우선 어노테이션 4번째 필드, 없으면 sensitive_map에서 조회, 둘 다 없으면 -1
+        sensitive_label = -1
+        try:
+            if isinstance(self.annotations[idx], (list, tuple)) and len(self.annotations[idx]) >= 4:
+                # 4번째 필드 사용 (int로 기대)
+                sensitive_label = int(self.annotations[idx][3])
+            elif self.sensitive_map is not None:
+                # image_id를 키로 조회 (문자열/정수 키 모두 처리)
+                key_candidates = [str(image_id), int(image_id) if str(image_id).isdigit() else None]
+                for k in key_candidates:
+                    if k is None:
+                        continue
+                    if k in self.sensitive_map:
+                        sensitive_label = int(self.sensitive_map[k])
+                        break
+        except Exception:
+            # 어떤 이유로든 파싱 실패 시 -1 유지
+            sensitive_label = -1
+        sensitive_tensor = torch.tensor(sensitive_label, dtype=torch.long)
+
         return {
             'image': image,
             'question': question_text,
-            'answer': answer_tensor
+            'answer': answer_tensor,
+            'sensitive': sensitive_tensor
         }
 
 def collate_fn_with_tokenizer(batch, tokenizer):
@@ -125,9 +168,11 @@ def collate_fn_with_tokenizer(batch, tokenizer):
     images = [item['image'] for item in batch]
     questions = [item['question'] for item in batch]
     answers = [item['answer'] for item in batch]
+    sensitives = [item.get('sensitive', torch.tensor(-1, dtype=torch.long)) for item in batch]
 
     batch_images = torch.stack(images, dim=0)
     batch_answers = torch.stack(answers, dim=0)
+    batch_sensitive = torch.stack(sensitives, dim=0)
     
     tokenized_inputs = tokenizer(
         questions, 
@@ -140,5 +185,6 @@ def collate_fn_with_tokenizer(batch, tokenizer):
     return {
         'image': batch_images,
         'inputs': tokenized_inputs,
-        'answer': batch_answers
+        'answer': batch_answers,
+        'sensitive': batch_sensitive
     }

@@ -27,7 +27,7 @@ from tqdm import tqdm
 from data.data import VQADataset, collate_fn_with_tokenizer
 from model.vision_encoder import CNN, ResNet50, SwinTransformer
 from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
-from model.model import VQAModel
+from model.model import VQAModel, VQAModel_IB
 
 torch.manual_seed(42)
 
@@ -62,10 +62,18 @@ def get_confidence_and_pred(outputs):
 
 # entropy/loss removed — attack uses confidence only
 
-def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True):
+def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True, model_type="VQAModel"):
     """
     데이터셋에 대한 confidence 계산 (entropy/loss removed)
     Returns dict with confidences, ground_truth and predictions (by threshold).
+    
+    Args:
+        model: VQAModel 또는 VQAModel_IB
+        dataloader: 데이터 로더
+        device: 디바이스
+        threshold: confidence threshold
+        is_member: member 데이터인지 여부
+        model_type: "VQAModel" 또는 "VQAModel_IB"
     """
     model.eval()
     confidences = []
@@ -78,11 +86,13 @@ def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True):
             inputs = batch['inputs'].to(device)
             answers = batch['answer'].to(device)
 
-            outputs = model(
+            # 다양한 모델 출력을 지원: logits 또는 (logits, ...)
+            out = model(
                 images=images,
                 input_ids=inputs['input_ids'],
                 attention_mask=inputs['attention_mask']
             )
+            outputs = out[0] if isinstance(out, tuple) else out
 
             batch_confidence, _ = get_confidence_and_pred(outputs)
             confidences.extend(batch_confidence.cpu().numpy())
@@ -207,25 +217,53 @@ def main():
     vision_class = VISION_MODELS.get(args.Vision)
     text_class = TEXT_MODELS.get(args.Text)
     
-    model = VQAModel(
-        vision=vision_class,
-        text=text_class,
-        fusion_type=args.fusion_type,
-        num_classes=args.num_classes
-    ).to(device)
+    # 모델 선택 (YAML의 model 필드 기반)
+    model_type = getattr(args, 'model', 'VQAModel')
     
-    model.load_state_dict(torch.load(args.weights, map_location=device))
+    if model_type == "VQAModel_IB":
+        model = VQAModel_IB(
+            vision=vision_class,
+            text=text_class,
+            fusion_type=args.fusion_type,
+            num_classes=args.num_classes, 
+            bottleneck_dim=getattr(args, 'bottleneck_dim', 256),
+            beta=getattr(args, 'beta', 0.1)
+        ).to(device)
+        print(f"Model: VQAModel_IB (bottleneck_dim={getattr(args, 'bottleneck_dim', 256)})")
+    else:
+        model = VQAModel(
+            vision=vision_class,
+            text=text_class,
+            fusion_type=args.fusion_type,
+            num_classes=args.num_classes
+        ).to(device)
+        print(f"Model: VQAModel")
+    
+    # Load weights with DP-SGD compatibility
+    state_dict = torch.load(args.weights, map_location=device, weights_only=False)
+    
+    # DP-SGD로 학습된 모델은 classifier._module.* 형태로 저장됨
+    # 일반 모델 형태로 변환
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        # classifier._module.X.weight -> classifier.X.weight
+        new_key = key.replace('classifier._module.', 'classifier.')
+        new_state_dict[new_key] = value
+    
+    # strict=False: DP-SGD 모델은 GroupNorm 사용 (BatchNorm running_mean/var 없음)
+    model.load_state_dict(new_state_dict, strict=False)
+    print(f"Weights loaded from {args.weights}")
     
     print("Evaluating member (train) data...")
     member_results = evaluate_privacy(
         model, train_loader, device,
-        threshold=args.threshold, is_member=True
+        threshold=args.threshold, is_member=True, model_type=model_type
     )
     
     print("Evaluating non-member (test) data...")
     nonmember_results = evaluate_privacy(
         model, test_loader, device,
-        threshold=args.threshold, is_member=False
+        threshold=args.threshold, is_member=False, model_type=model_type
     )
 
     # visualization

@@ -5,39 +5,10 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import BertTokenizer
 from functools import partial
-import argparse
-import yaml
-from pathlib import Path
 
 from data.data import VQADataset, collate_fn_with_tokenizer
-from utils.src import validate, validate_ib
-from model.vision_encoder import CNN, ResNet50, SwinTransformer
-from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
-from model.model import VQAModel, VQAModel_IB
-
-def parse_args():
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
-    p.add_argument('--weights','-w', type=str, help='path to model weights file')
-    known, remaining = p.parse_known_args()
-
-    cfg_from_file = {}
-    if known.cfg:
-        cfg_path = Path(known.cfg)
-        if cfg_path.exists():
-            with open(cfg_path, 'r', encoding='utf-8') as f:
-                cfg_from_file = yaml.safe_load(f) or {}
-        else:
-            raise FileNotFoundError(f"Config file not found: {known.cfg}")
-    
-    args_dict = {**cfg_from_file, 'weights': known.weights}
-    
-    if not args_dict['weights']:
-        raise ValueError("--weights/-w argument is required")
-        
-    args_obj = argparse.Namespace(**args_dict)
-    return args_obj
-
+from utils.src import validate
+from utils.util import parse_args, create_model, load_weights
 
 def main():
     args = parse_args()
@@ -70,32 +41,13 @@ def main():
         pin_memory=True
     )
 
-    VISION_MODELS = {
-        "CNN": CNN,
-        "ResNet50": ResNet50,
-        "SwinTransformer": SwinTransformer
-    }
-    TEXT_MODELS = {
-        "Bert": Bert,
-        "RoBerta": RoBerta,
-        "BertQLoRA": BertQLoRA, 
-        "RoBertaQLoRA": RoBertaQLoRA
-    }
-    vision_class = VISION_MODELS.get(args.Vision)
-    text_class = TEXT_MODELS.get(args.Text)
-
-    if args.model == "VQAModel":
-        model = VQAModel(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes).to(device)
-    elif args.model == "VQAModel_IB":
-        model = VQAModel_IB(vision=vision_class, text=text_class, fusion_type=args.fusion_type, num_classes=args.num_classes, 
-                            bottleneck_dim=getattr(args, 'bottleneck_dim', 256), 
-                            beta=getattr(args, 'beta', 0.1)).to(device)
-    else:
-        raise ValueError(f"Unknown model: {args.model}")
+    # 모델 생성
+    model = create_model(args, device)
     
     criterion = nn.CrossEntropyLoss()
 
-    model.load_state_dict(torch.load(args.weights, map_location=device))
+    # 가중치 로드 (DP-SGD 호환)
+    model = load_weights(model, args.weights, device)
 
     model.eval()
 
@@ -104,12 +56,16 @@ def main():
     mode = "test"
 
     with torch.no_grad():
-        if args.model == "VQAModel":
-            val_loss, val_acc, metrics = validate(model, test_loader, criterion, device, mode=mode, weight_path=args.weights)
-        elif args.model == "VQAModel_IB":
-            val_acc, val_loss = validate_ib(model, test_loader, criterion, device)
-            metrics = {'loss': val_loss, 'accuracy': val_acc}
-    
+        val_loss, val_acc, metrics = validate(
+            model=model,
+            val_loader=test_loader,
+            criterion=criterion,
+            device=device,
+            model_type=args.model,
+            mode=mode,
+            weight_path=args.weights
+        )
+
     print("--- Test Results ---")
     print(f"Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.2f}%\n")
     if 'precision' in metrics:
