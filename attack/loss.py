@@ -10,6 +10,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from tqdm import tqdm
+import sys
+
+# 프로젝트 루트를 sys.path에 추가
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from attack.src import (
     parse_args_with_config, setup_data_loaders, load_model, 
@@ -18,7 +22,6 @@ from attack.src import (
 )
 
 torch.manual_seed(42)
-
 
 def compute_loss(outputs, targets, criterion):
     """
@@ -36,7 +39,6 @@ def compute_loss(outputs, targets, criterion):
     criterion_no_reduction = nn.CrossEntropyLoss(reduction='none')
     losses = criterion_no_reduction(outputs, targets)
     return losses
-
 
 def evaluate_privacy_loss(model, dataloader, device, threshold=1.0, is_member=True, model_type="VQAModel"):
     """
@@ -101,7 +103,7 @@ def main():
     print(f"Using device: {device}")
 
     weight_name = Path(args.weights).stem
-    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis_loss', weight_name)
+    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "loss_based")
     os.makedirs(result_dir, exist_ok=True)
     
     # 데이터 로더 설정

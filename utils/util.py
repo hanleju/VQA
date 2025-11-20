@@ -7,10 +7,21 @@ from model.vision_encoder import CNN, ResNet50, SwinTransformer
 from model.text_encoder import Bert, RoBerta, BertQLoRA, RoBertaQLoRA
 from model.model import VQAModel, VQAModel_IB
 
-def parse_args():
+def parse_args(require_weights=False):
+    """
+    YAML 설정 파일과 커맨드라인 인자를 파싱
+    
+    Args:
+        require_weights: weights 인자가 필수인지 여부 (기본값: False)
+                        - True: test.py 등에서 사용 (weights 필수)
+                        - False: train.py 등에서 사용 (weights 선택)
+    
+    Returns:
+        args_obj: 파싱된 인자 객체
+    """
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--cfg', '-c', type=str, default=None, help='path to YAML config file')
-    p.add_argument('--weights','-w', type=str, help='path to model weights file')
+    p.add_argument('--weights','-w', type=str, default=None, help='path to model weights file (optional for training)')
     known, remaining = p.parse_known_args()
 
     cfg_from_file = {}
@@ -24,7 +35,8 @@ def parse_args():
     
     args_dict = {**cfg_from_file, 'weights': known.weights}
     
-    if not args_dict['weights']:
+    # weights가 필수인 경우에만 체크
+    if require_weights and not args_dict['weights']:
         raise ValueError("--weights/-w argument is required")
         
     args_obj = argparse.Namespace(**args_dict)

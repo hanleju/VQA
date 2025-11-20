@@ -94,6 +94,8 @@ class VQADataset(Dataset):
                 'image': 이미지 텐서,
                 'question': 질문 텍스트(string),
                 'answer': 답변 인덱스(tensor),
+                'answer_text': 답변 텍스트(string),
+                'image_id': 이미지 ID(string),
                 'sensitive': 민감 레이블 텐서(int) 또는 -1(없음)
             }
         """
@@ -154,6 +156,8 @@ class VQADataset(Dataset):
             'image': image,
             'question': question_text,
             'answer': answer_tensor,
+            'answer_text': answer_text,
+            'image_id': str(image_id),
             'sensitive': sensitive_tensor
         }
 
@@ -168,6 +172,8 @@ def collate_fn_with_tokenizer(batch, tokenizer):
     images = [item['image'] for item in batch]
     questions = [item['question'] for item in batch]
     answers = [item['answer'] for item in batch]
+    answer_texts = [item['answer_text'] for item in batch]
+    image_ids = [item['image_id'] for item in batch]
     sensitives = [item.get('sensitive', torch.tensor(-1, dtype=torch.long)) for item in batch]
 
     batch_images = torch.stack(images, dim=0)
@@ -186,5 +192,8 @@ def collate_fn_with_tokenizer(batch, tokenizer):
         'image': batch_images,
         'inputs': tokenized_inputs,
         'answer': batch_answers,
+        'answer_text': answer_texts,
+        'image_id': image_ids,
+        'question': questions,
         'sensitive': batch_sensitive
     }

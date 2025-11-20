@@ -11,12 +11,12 @@ from opacus.validators import ModuleValidator
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import train, validate
-from utils.util import parse_args, create_model
+from utils.util import parse_args, create_model, load_weights
 
 torch.manual_seed(42)
 
 def main():
-    args = parse_args()
+    args = parse_args(require_weights=False)  # train에서는 weights 선택
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     os.makedirs(args.model_save_path, exist_ok=True)
@@ -63,6 +63,12 @@ def main():
 
     # 모델 생성
     model = create_model(args, device)
+    
+    # 기존 가중치가 있으면 로드 (추가 학습용)
+    if hasattr(args, 'weights') and args.weights:
+        print(f"Loading pre-trained weights from {args.weights}")
+        model = load_weights(model, args.weights, device)
+        print("✓ Pre-trained weights loaded successfully")
     
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss()

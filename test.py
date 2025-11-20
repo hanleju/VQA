@@ -11,7 +11,7 @@ from utils.src import validate
 from utils.util import parse_args, create_model, load_weights
 
 def main():
-    args = parse_args()
+    args = parse_args(require_weights=True)  # test에서는 weights 필수
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     os.makedirs(args.model_save_path, exist_ok=True)

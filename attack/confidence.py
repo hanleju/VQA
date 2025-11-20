@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from tqdm import tqdm
+import sys
+
+# 프로젝트 루트를 sys.path에 추가
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from attack.src import (
     parse_args_with_config, setup_data_loaders, 
@@ -28,7 +32,7 @@ def get_confidence_and_pred(outputs):
     return confidence, predictions
 
 
-def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True, model_type="VQAModel"):
+def evaluate_privacy_confidence(model, dataloader, device, threshold=0.6, is_member=True, model_type="VQAModel"):
     """
     데이터셋에 대한 confidence 계산
     Confidence가 threshold보다 높으면 member로 예측
@@ -46,8 +50,8 @@ def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True, m
     """
     model.eval()
     confidences = []
-    ground_truth = []  # 실제 membership (1 for member, 0 for non-member)
-    predictions = []   # 예측된 membership (True/False)
+    ground_truth = []  # (1 for member, 0 for non-member)
+    predictions = []   # (True/False)
 
     with torch.no_grad():
         for batch in tqdm(dataloader):
@@ -55,7 +59,6 @@ def evaluate_privacy(model, dataloader, device, threshold=0.6, is_member=True, m
             inputs = batch['inputs'].to(device)
             answers = batch['answer'].to(device)
 
-            # 다양한 모델 출력을 지원: logits 또는 (logits, ...)
             out = model(
                 images=images,
                 input_ids=inputs['input_ids'],
@@ -87,7 +90,7 @@ def main():
     print(f"Using device: {device}")
 
     weight_name = Path(args.weights).stem
-    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', weight_name)
+    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "confidence_based")
     os.makedirs(result_dir, exist_ok=True)
     
     # 데이터 로더 설정
@@ -97,13 +100,13 @@ def main():
     model, model_type = load_model(args, device)
     
     print("Evaluating member (train) data...")
-    member_results = evaluate_privacy(
+    member_results = evaluate_privacy_confidence(
         model, train_loader, device,
         threshold=args.threshold, is_member=True, model_type=model_type
     )
     
     print("Evaluating non-member (test) data...")
-    nonmember_results = evaluate_privacy(
+    nonmember_results = evaluate_privacy_confidence(
         model, test_loader, device,
         threshold=args.threshold, is_member=False, model_type=model_type
     )
