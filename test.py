@@ -9,6 +9,9 @@ from functools import partial
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.src import validate
 from utils.util import parse_args, create_model, load_weights
+from torch.utils.data import random_split
+
+torch.manual_seed(42)
 
 def main():
     args = parse_args(require_weights=True)  # test에서는 weights 필수
@@ -26,9 +29,18 @@ def main():
     
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
-    test_dataset = VQADataset(root_dir=args.dataset_root, 
-                                split='test',
-                                transform=image_transform)
+    # train split 전체를 로드한 후 동일한 방식으로 분할
+    full_dataset = VQADataset(root_dir=args.dataset_root, split='train', transform=image_transform)
+    
+    total_size = len(full_dataset)
+    train_size = int(total_size * 0.7)
+    val_size = int(total_size * 0.2)
+    test_size = total_size - train_size - val_size
+    
+    # train.py와 동일한 seed로 분할하여 test 데이터만 사용
+    _, _, test_dataset = random_split(full_dataset, [train_size, val_size, test_size])
+    
+    print(f"Using test split: {test_size} samples (from 7:2:1 split)")
 
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     

@@ -6,7 +6,7 @@ utils/util.py의 함수들을 재사용하고 attack 전용 함수들만 정의
 import os
 import argparse
 import torch
-from torch.utils.data import DataLoader, Subset, random_split
+from torch.utils.data import DataLoader, random_split
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -27,6 +27,8 @@ from transformers import BertTokenizer
 
 from data.data import VQADataset, collate_fn_with_tokenizer
 from utils.util import parse_args, create_model, load_weights
+from tqdm import tqdm
+import torch.nn as nn
 
 
 def parse_args_with_config(extra_args=None):
@@ -60,9 +62,18 @@ def parse_args_with_config(extra_args=None):
 
 
 def setup_data_loaders(args, seed=42):
-    """
-    Train/Test 데이터로더 설정 (동일한 크기로 샘플링)
+    """Membership Inference 전용 데이터 로더.
+
+    train.py와 동일한 7:2:1 분할을 수행한 후:
+        - Member: 70% train 중에서 10% test와 동일한 샘플 수만큼만 사용
+        - Non-member: 10% test 전체 사용
     
+    이렇게 하면 member:non-member = 1:1 균등 분할이 되며,
+    타겟 모델이 실제로 학습한 데이터와 학습하지 않은 데이터를 정확히 구분 가능합니다.
+    
+    MIA 평가에서는 member와 non-member의 수가 동일해야 
+    올바른 accuracy, precision, recall 측정이 가능합니다.
+
     Returns:
         train_loader, test_loader, tokenizer, image_transform
     """
@@ -75,48 +86,28 @@ def setup_data_loaders(args, seed=42):
     
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
-    full_train_dataset = VQADataset(
+    full_dataset = VQADataset(
         root_dir=args.dataset_root,
         split='train',
         transform=image_transform
     )
-
-    test_dataset = VQADataset(
-        root_dir=args.dataset_root,
-        split='test',
-        transform=image_transform
-    )
-
-    total_size = len(full_train_dataset)
-    val_size = int(total_size * getattr(args, 'val_split_ratio', 0.1))
-    train_size = total_size - val_size
-
-    g = torch.Generator()
-    g.manual_seed(seed)
-    train_dataset, _ = random_split(full_train_dataset, [train_size, val_size], generator=g)
+    total_size = len(full_dataset)
     
+    # train.py와 동일한 7:2:1 분할
+    train_size = int(total_size * 0.7)
+    val_size = int(total_size * 0.2)
+    test_size = total_size - train_size - val_size
+
+    g = torch.Generator(); g.manual_seed(seed)
+    train_full_subset, _, test_subset = random_split(full_dataset, [train_size, val_size, test_size], generator=g)
+    
+    # Member: train 중에서 test와 동일한 크기만큼만 샘플링 (1:1 균등)
+    from torch.utils.data import Subset
+    member_indices = list(range(len(test_subset)))  # test_size와 동일한 크기
+    train_subset = Subset(train_full_subset, member_indices)
+
+    # collate_fn (두 분기 모두에서 공통 사용)
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
-    
-    train_len = len(train_dataset)
-    test_len = len(test_dataset)
-    desired = min(train_len, test_len)
-
-    g2 = torch.Generator()
-    g2.manual_seed(seed)
-
-    if train_len > desired:
-        perm_train = torch.randperm(train_len, generator=g2)
-        train_indices = perm_train[:desired].tolist()
-        train_subset = Subset(train_dataset, train_indices)
-    else:
-        train_subset = train_dataset
-
-    if test_len > desired:
-        perm_test = torch.randperm(test_len, generator=g2)
-        test_indices = perm_test[:desired].tolist()
-        test_subset = Subset(test_dataset, test_indices)
-    else:
-        test_subset = test_dataset
 
     train_loader = DataLoader(
         dataset=train_subset,
@@ -256,3 +247,134 @@ def print_results(roc_auc, pr_auc, metrics):
     print(f"Attack Precision: {metrics['precision']:.4f}")
     print(f"Attack Recall: {metrics['recall']:.4f}")
     print(f"Attack F1 Score: {metrics['f1']:.4f}")
+
+
+# ============================================================
+# Loss-based Attack Functions
+# ============================================================
+
+def compute_loss(outputs, targets):
+    """
+    배치의 각 샘플에 대한 Loss 계산
+    
+    Args:
+        outputs: 모델 출력 (batch_size, num_classes)
+        targets: 정답 레이블 (batch_size,)
+        
+    Returns:
+        losses: 각 샘플의 loss 값 (batch_size,)
+    """
+    criterion_no_reduction = nn.CrossEntropyLoss(reduction='none')
+    losses = criterion_no_reduction(outputs, targets)
+    return losses
+
+
+def evaluate_privacy_loss(model, dataloader, device, threshold=1.0, is_member=True, model_type="VQAModel"):
+    """
+    데이터셋에 대한 loss 계산
+    Loss가 threshold보다 낮으면 member로 예측
+    
+    Args:
+        model: VQAModel 또는 VQAModel_IB
+        dataloader: 데이터 로더
+        device: 디바이스
+        threshold: loss threshold (이보다 낮으면 member)
+        is_member: member 데이터인지 여부
+        model_type: "VQAModel" 또는 "VQAModel_IB"
+        
+    Returns:
+        dict with losses, ground_truth and predictions
+    """
+    model.eval()
+    criterion = nn.CrossEntropyLoss(reduction='none')
+    
+    losses = []
+    ground_truth = []
+    predictions = []
+
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating privacy (loss)"):
+            images = batch['image'].to(device)
+            inputs = batch['inputs'].to(device)
+            answers = batch['answer'].to(device)
+
+            out = model(
+                images=images,
+                input_ids=inputs['input_ids'],
+                attention_mask=inputs['attention_mask']
+            )
+            outputs = out[0] if isinstance(out, tuple) else out
+
+            batch_losses = criterion(outputs, answers)
+            losses.extend(batch_losses.cpu().numpy())
+
+            pred_member = batch_losses.cpu().numpy() <= threshold
+            predictions.extend(pred_member)
+            ground_truth.extend([1 if is_member else 0] * len(images))
+
+    return {
+        'losses': np.array(losses),
+        'ground_truth': np.array(ground_truth),
+        'predictions': np.array(predictions)
+    }
+
+
+# ============================================================
+# Confidence-based Attack Functions
+# ============================================================
+
+def get_confidence_and_pred(outputs):
+    """
+    소프트맥스 출력에서 confidence(최대 확률)와 예측 클래스를 반환
+    """
+    probs = torch.softmax(outputs, dim=1)
+    confidence, predictions = torch.max(probs, dim=1)
+    return confidence, predictions
+
+
+def evaluate_privacy_confidence(model, dataloader, device, threshold=0.6, is_member=True, model_type="VQAModel"):
+    """
+    데이터셋에 대한 confidence 계산
+    Confidence가 threshold보다 높으면 member로 예측
+    
+    Args:
+        model: VQAModel 또는 VQAModel_IB
+        dataloader: 데이터 로더
+        device: 디바이스
+        threshold: confidence threshold
+        is_member: member 데이터인지 여부
+        model_type: "VQAModel" 또는 "VQAModel_IB"
+        
+    Returns:
+        dict with confidences, ground_truth and predictions
+    """
+    model.eval()
+    confidences = []
+    ground_truth = []
+    predictions = []
+
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating privacy (confidence)"):
+            images = batch['image'].to(device)
+            inputs = batch['inputs'].to(device)
+            answers = batch['answer'].to(device)
+
+            out = model(
+                images=images,
+                input_ids=inputs['input_ids'],
+                attention_mask=inputs['attention_mask']
+            )
+            outputs = out[0] if isinstance(out, tuple) else out
+
+            batch_confidence, _ = get_confidence_and_pred(outputs)
+            confidences.extend(batch_confidence.cpu().numpy())
+
+            pred_member = batch_confidence.cpu().numpy() >= threshold
+            predictions.extend(pred_member)
+            ground_truth.extend([1 if is_member else 0] * len(images))
+
+    return {
+        'confidences': np.array(confidences),
+        'ground_truth': np.array(ground_truth),
+        'predictions': np.array(predictions)
+    }

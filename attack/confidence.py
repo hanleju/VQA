@@ -14,70 +14,14 @@ import sys
 # 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from attack.src import (
+from attack.metric_src import (
     parse_args_with_config, setup_data_loaders, 
     load_model, plot_roc_curve, plot_pr_curve,
     plot_confusion_matrix, calculate_metrics, save_privacy_metrics, 
-    print_results
+    print_results, get_confidence_and_pred, evaluate_privacy_confidence
 )
 
 torch.manual_seed(42)
-
-def get_confidence_and_pred(outputs):
-    """
-    소프트맥스 출력에서 confidence(최대 확률)와 예측 클래스를 반환
-    """
-    probs = torch.softmax(outputs, dim=1)
-    confidence, predictions = torch.max(probs, dim=1)
-    return confidence, predictions
-
-
-def evaluate_privacy_confidence(model, dataloader, device, threshold=0.6, is_member=True, model_type="VQAModel"):
-    """
-    데이터셋에 대한 confidence 계산
-    Confidence가 threshold보다 높으면 member로 예측
-    
-    Args:
-        model: VQAModel 또는 VQAModel_IB
-        dataloader: 데이터 로더
-        device: 디바이스
-        threshold: confidence threshold
-        is_member: member 데이터인지 여부
-        model_type: "VQAModel" 또는 "VQAModel_IB"
-        
-    Returns:
-        dict with confidences, ground_truth and predictions
-    """
-    model.eval()
-    confidences = []
-    ground_truth = []  # (1 for member, 0 for non-member)
-    predictions = []   # (True/False)
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader):
-            images = batch['image'].to(device)
-            inputs = batch['inputs'].to(device)
-            answers = batch['answer'].to(device)
-
-            out = model(
-                images=images,
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask']
-            )
-            outputs = out[0] if isinstance(out, tuple) else out
-
-            batch_confidence, _ = get_confidence_and_pred(outputs)
-            confidences.extend(batch_confidence.cpu().numpy())
-
-            pred_member = batch_confidence.cpu().numpy() >= threshold
-            predictions.extend(pred_member)
-            ground_truth.extend([1 if is_member else 0] * len(images))
-
-    return {
-        'confidences': np.array(confidences),
-        'ground_truth': np.array(ground_truth),
-        'predictions': np.array(predictions)
-    }
 
 def main():
     # threshold 인자 추가
@@ -90,10 +34,10 @@ def main():
     print(f"Using device: {device}")
 
     weight_name = Path(args.weights).stem
-    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "confidence_based")
+    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "confidence")
     os.makedirs(result_dir, exist_ok=True)
     
-    # 데이터 로더 설정
+    # 데이터 로더 설정 (항상 내부 7:2:1 분할: 70% member, 10% non-member)
     train_loader, test_loader, tokenizer, image_transform = setup_data_loaders(args)
     
     # 모델 로드

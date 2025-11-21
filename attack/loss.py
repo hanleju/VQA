@@ -1,6 +1,10 @@
 """
 Loss 기반 Membership Inference Attack
 Loss 값을 기반으로 member/non-member를 구분하는 공격
+
+python ./attack/loss.py -c ./cfg/IB/SwinT_BERTLoRA_coco/coattention.yaml -w ./checkpoints/IB/SwinT_BERTLoRA_coco_3/coattention/best_model.pth --threshold 0.6
+
+
 """
 import os
 import torch
@@ -15,82 +19,14 @@ import sys
 # 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from attack.src import (
+from attack.metric_src import (
     parse_args_with_config, setup_data_loaders, load_model, 
     plot_roc_curve, plot_pr_curve, plot_confusion_matrix, 
-    calculate_metrics, save_privacy_metrics, print_results
+    calculate_metrics, save_privacy_metrics, print_results,
+    compute_loss, evaluate_privacy_loss
 )
 
 torch.manual_seed(42)
-
-def compute_loss(outputs, targets, criterion):
-    """
-    배치의 각 샘플에 대한 Loss 계산
-    
-    Args:
-        outputs: 모델 출력 (batch_size, num_classes)
-        targets: 정답 레이블 (batch_size,)
-        criterion: Loss 함수
-        
-    Returns:
-        losses: 각 샘플의 loss 값 (batch_size,)
-    """
-    # reduction='none'으로 설정하여 각 샘플별 loss 계산
-    criterion_no_reduction = nn.CrossEntropyLoss(reduction='none')
-    losses = criterion_no_reduction(outputs, targets)
-    return losses
-
-def evaluate_privacy_loss(model, dataloader, device, threshold=1.0, is_member=True, model_type="VQAModel"):
-    """
-    데이터셋에 대한 loss 계산
-    Loss가 threshold보다 낮으면 member로 예측
-    
-    Args:
-        model: VQAModel 또는 VQAModel_IB
-        dataloader: 데이터 로더
-        device: 디바이스
-        threshold: loss threshold (이보다 낮으면 member)
-        is_member: member 데이터인지 여부
-        model_type: "VQAModel" 또는 "VQAModel_IB"
-        
-    Returns:
-        dict with losses, ground_truth and predictions
-    """
-    model.eval()
-    criterion = nn.CrossEntropyLoss(reduction='none')
-    
-    losses = []
-    ground_truth = []  # 실제 membership (1 for member, 0 for non-member)
-    predictions = []   # 예측된 membership (True/False)
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader):
-            images = batch['image'].to(device)
-            inputs = batch['inputs'].to(device)
-            answers = batch['answer'].to(device)
-
-            # 다양한 모델 출력을 지원: logits 또는 (logits, ...)
-            out = model(
-                images=images,
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask']
-            )
-            outputs = out[0] if isinstance(out, tuple) else out
-
-            # 각 샘플의 loss 계산
-            batch_losses = criterion(outputs, answers)
-            losses.extend(batch_losses.cpu().numpy())
-
-            # Loss가 낮을수록 member일 가능성이 높음
-            pred_member = batch_losses.cpu().numpy() <= threshold
-            predictions.extend(pred_member)
-            ground_truth.extend([1 if is_member else 0] * len(images))
-
-    return {
-        'losses': np.array(losses),
-        'ground_truth': np.array(ground_truth),
-        'predictions': np.array(predictions)
-    }
 
 def main():
     # threshold 인자 추가
@@ -103,10 +39,10 @@ def main():
     print(f"Using device: {device}")
 
     weight_name = Path(args.weights).stem
-    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "loss_based")
+    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', "loss")
     os.makedirs(result_dir, exist_ok=True)
     
-    # 데이터 로더 설정
+    # 데이터 로더 설정 (항상 내부 7:2:1 분할 사용)
     train_loader, test_loader, tokenizer, image_transform = setup_data_loaders(args)
     
     # 모델 로드

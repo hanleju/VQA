@@ -34,12 +34,13 @@ def main():
     full_dataset = VQADataset(root_dir=args.dataset_root, split='train', transform=image_transform)
 
     total_size = len(full_dataset)
-    val_size = int(total_size * args.val_split_ratio)
-    train_size = total_size - val_size
+    train_size = int(total_size * 0.7)
+    val_size = int(total_size * 0.2)
+    test_size = total_size - train_size - val_size
     
-    print(f"Data Split -> Train: {train_size} samples, Validation: {val_size} samples")
+    print(f"Data Split (7:2:1) -> Train: {train_size} samples, Validation: {val_size} samples, Test: {test_size} samples")
     
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    train_dataset, val_dataset, test_dataset = random_split(full_dataset, [train_size, val_size, test_size])
 
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     
@@ -79,41 +80,58 @@ def main():
     use_dp_sgd = getattr(args, 'dp_sgd', False)
     
     if use_dp_sgd:
-        target_epsilon = float(getattr(args, 'target_epsilon', 3.0))
         target_delta = float(getattr(args, 'target_delta', 1e-5))
-        max_grad_norm = float(getattr(args, 'max_grad_norm', 1.0))
-        
+        max_grad_norm = float(getattr(args, 'max_grad_norm', 10.0))  # clipping norm (C)
+        noise_multiplier = getattr(args, 'noise_multiplier', None)
+        target_epsilon = float(getattr(args, 'target_epsilon', 3.0))  # fallback when using epsilon mode
+
         print(f"\n=== DP-SGD Configuration ===")
-        print(f"Target ε (epsilon): {target_epsilon}, Target δ (delta): {target_delta}, Max gradient norm: {max_grad_norm}")
-        print("\nConverting BatchNorm to GroupNorm in classifier...")
+        if noise_multiplier is not None:
+            print(f"Mode: noise_multiplier | σ: {noise_multiplier}, δ: {target_delta}, C: {max_grad_norm}")
+        else:
+            print(f"Mode: target_epsilon | ε: {target_epsilon}, δ: {target_delta}, C: {max_grad_norm}")
+
+        print("Converting BatchNorm to GroupNorm in classifier...")
         model.classifier = ModuleValidator.fix(model.classifier)
         model = model.to(device)
-        
+
         privacy_engine = PrivacyEngine(secure_mode=False)
-        
+
         # classifier optimizer
         classifier_optimizer = optim.AdamW(model.classifier.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        
-        model.classifier, classifier_optimizer, train_loader = privacy_engine.make_private_with_epsilon(
-            module=model.classifier,
-            optimizer=classifier_optimizer,
-            data_loader=train_loader,
-            epochs=args.epochs,
-            target_epsilon=target_epsilon,
-            target_delta=target_delta,
-            max_grad_norm=max_grad_norm,
-            poisson_sampling=True,
-        )
-        
-        # non classifier optimizer
+
+        if noise_multiplier is not None:
+            # Use explicit noise multiplier (Paper-style control)
+            model.classifier, classifier_optimizer, train_loader = privacy_engine.make_private(
+                module=model.classifier,
+                optimizer=classifier_optimizer,
+                data_loader=train_loader,
+                noise_multiplier=noise_multiplier,
+                max_grad_norm=max_grad_norm,
+                poisson_sampling=True,
+            )
+        else:
+            # Fallback to epsilon target mode
+            model.classifier, classifier_optimizer, train_loader = privacy_engine.make_private_with_epsilon(
+                module=model.classifier,
+                optimizer=classifier_optimizer,
+                data_loader=train_loader,
+                epochs=args.epochs,
+                target_epsilon=target_epsilon,
+                target_delta=target_delta,
+                max_grad_norm=max_grad_norm,
+                poisson_sampling=True,
+            )
+
+        # non classifier optimizer (no DP applied)
         non_classifier_params = [
-            p for n, p in model.named_parameters() 
+            p for n, p in model.named_parameters()
             if not n.startswith('classifier.') and p.requires_grad
         ]
         main_optimizer = optim.AdamW(non_classifier_params, lr=args.lr, weight_decay=args.weight_decay)
-        
+
         optimizer = {'main': main_optimizer, 'classifier': classifier_optimizer}
-        
+
         print(f"\n=== DP-SGD Enabled (Classifier Only) ===")
     
     print(f"Vision: {args.Vision}, Text: {args.Text}, Fusion: {args.fusion_type} \n Start Train...")
@@ -158,8 +176,12 @@ def main():
             log_msg = f"Epoch {epoch+1} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
             
             if use_dp_sgd:
-                epsilon = privacy_engine.get_epsilon(target_delta)
-                log_msg += f" | ε: {epsilon:.2f}"
+                # Compute epsilon if possible (noise_multiplier mode or epsilon mode)
+                try:
+                    epsilon = privacy_engine.get_epsilon(target_delta)
+                    log_msg += f" | ε: {epsilon:.2f}"
+                except Exception:
+                    pass
             
             print(log_msg)
             log_file.write(log_msg + "\n")
@@ -187,11 +209,17 @@ def main():
     print(f"Best Validation ACC: {best_val_acc:.2f}%")
     
     if use_dp_sgd:
-        final_epsilon = privacy_engine.get_epsilon(target_delta)
-        print(f"\n=== Final Privacy Budget ===")
-        print(f"ε (epsilon): {final_epsilon:.2f}")
-        print(f"δ (delta): {target_delta}")
-        print(f"============================\n")
+        try:
+            final_epsilon = privacy_engine.get_epsilon(target_delta)
+            print(f"\n=== Final Privacy Budget ===")
+            print(f"ε (epsilon): {final_epsilon:.2f}")
+            print(f"δ (delta): {target_delta}")
+            if noise_multiplier is not None:
+                print(f"σ (noise_multiplier): {noise_multiplier}")
+            print(f"C (clipping norm): {max_grad_norm}")
+            print(f"============================\n")
+        except Exception:
+            print("Could not compute final epsilon.")
 
 
 if __name__ == '__main__':
