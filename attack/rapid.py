@@ -8,7 +8,7 @@ RAPID: Advanced Difficulty Calibration with MLP Attack Model
 - 더 복잡한 비선형 패턴 학습 가능
 
 사용법:
-python ./attack/rapid.py -c ./cfg/baseline/SwinT_BERTLoRA_coco/concat.yaml -w ./checkpoints/baseline/SwinT_BERTLoRA_coco/concat/best_model.pth --epochs 50 --lr 0.001
+python ./attack/rapid.py -c ./cfg/cocoqa/Res_Bert_Lora.yaml -w ./checkpoints/cocoqa/Res_Bert_Lora/best_model.pth --shadow_models blip,vilt,git --epochs 50 --lr 0.001
 """
 import os
 import torch
@@ -20,8 +20,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 
-
-# 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from attack.metric_src import (
@@ -36,10 +34,7 @@ from attack.cali_src import (
 torch.manual_seed(42)
 np.random.seed(42)
 
-
-# ============================================================
 # MLP Attack Model
-# ============================================================
 
 class MLPAttackModel(nn.Module):
     """
@@ -145,14 +140,13 @@ def train_mlp_attack_model(calibrated_train_losses, calibrated_test_losses,
     return model, train_probs, test_probs
 
 
-def evaluate_mlp_attack(train_probs, test_probs, threshold=0.5):
+def evaluate_mlp_attack(train_probs, test_probs):
     """
     MLP 공격 평가
     
     Args:
         train_probs: train member 확률
         test_probs: test non-member 확률
-        threshold: 이진 분류 threshold
         
     Returns:
         scores, labels, predictions
@@ -162,7 +156,8 @@ def evaluate_mlp_attack(train_probs, test_probs, threshold=0.5):
         np.ones(len(train_probs)),
         np.zeros(len(test_probs))
     ])
-    predictions = (scores >= threshold).astype(int)
+    # Binary classification: 0.5 threshold
+    predictions = (scores >= 0.5).astype(int)
     
     return scores, labels, predictions
 
@@ -189,7 +184,8 @@ def main():
         ('--epochs', int, 50, 'MLP training epochs'),
         ('--lr', float, 0.001, 'MLP learning rate'),
         ('--batch_size', int, 64, 'MLP training batch size'),
-        ('--threshold', float, 0.5, 'Binary classification threshold'),
+        ('--reference_weights', str, None, 'Path to reference model weights (for fine-tuned models)'),
+        ('--output_dir', str, 'rapid', 'Output directory name under privacy_analysis/'),
     ]
     args = parse_args_with_config(extra_args)
     
@@ -197,7 +193,8 @@ def main():
     print(f"Using device: {device}")
     
     weight_name = Path(args.weights).stem
-    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', 'rapid')
+    output_subdir = getattr(args, 'output_dir', 'rapid')
+    result_dir = os.path.join(os.path.dirname(args.weights), 'privacy_analysis', output_subdir)
     os.makedirs(result_dir, exist_ok=True)
     
     shadow_models = None
@@ -212,14 +209,13 @@ def main():
     print(f"Weights: {args.weights}")
     print(f"Output: {result_dir}")
     print(f"{'='*60}\n")
-    
-    # 1. Shadow model들로부터 난이도 추정
+
     print("\n=== Step 1: Estimating Sample Difficulty ===")
-    train_difficulty, test_difficulty = collect_shadow_difficulties(args, device, shadow_models)
+    reference_weights = getattr(args, 'reference_weights', None)
+    train_difficulty, test_difficulty = collect_shadow_difficulties(args, device, shadow_models, reference_weights)
     print(f"Train difficulty - Mean: {train_difficulty.mean():.4f}, Std: {train_difficulty.std():.4f}")
     print(f"Test difficulty - Mean: {test_difficulty.mean():.4f}, Std: {test_difficulty.std():.4f}")
     
-    # 2. Target model의 loss 수집
     print("\n=== Step 2: Collecting Target Model Losses ===")
     train_loader, test_loader, _, _ = setup_data_loaders(args, seed=42)
     model, model_type = load_model(args, device)
@@ -229,14 +225,12 @@ def main():
     print(f"Target train loss - Mean: {target_train_losses.mean():.4f}, Std: {target_train_losses.std():.4f}")
     print(f"Target test loss - Mean: {target_test_losses.mean():.4f}, Std: {target_test_losses.std():.4f}")
     
-    # 3. Loss 보정
     print("\n=== Step 3: Calibrating Losses ===")
     calibrated_train_losses = calibrate_loss(target_train_losses, train_difficulty)
     calibrated_test_losses = calibrate_loss(target_test_losses, test_difficulty)
     print(f"Calibrated train loss - Mean: {calibrated_train_losses.mean():.4f}, Std: {calibrated_train_losses.std():.4f}")
     print(f"Calibrated test loss - Mean: {calibrated_test_losses.mean():.4f}, Std: {calibrated_test_losses.std():.4f}")
     
-    # 4. MLP Attack Model 학습
     print("\n=== Step 4: Training MLP Attack Model ===")
     mlp_model, train_probs, test_probs = train_mlp_attack_model(
         calibrated_train_losses, calibrated_test_losses,
@@ -244,11 +238,9 @@ def main():
         device, epochs=args.epochs, lr=args.lr, batch_size=args.batch_size
     )
     
-    # 5. 공격 평가
     print("\n=== Step 5: Evaluating MLP Attack ===")
-    scores, labels, predictions = evaluate_mlp_attack(train_probs, test_probs, args.threshold)
+    scores, labels, predictions = evaluate_mlp_attack(train_probs, test_probs)
     
-    # 6. 시각화 및 메트릭
     print("\n=== Step 6: Visualization and Metrics ===")
     
     # Distribution plots
@@ -264,26 +256,23 @@ def main():
     )
     
     # ROC curve
-    roc_auc = plot_roc_curve(labels, scores, os.path.join(result_dir, 'roc_curve.png'))
+    roc_auc, tpr_at_low_fpr = plot_roc_curve(labels, scores, os.path.join(result_dir, 'roc_curve.png'))
     
     # PR curve
     pr_auc = plot_pr_curve(labels, scores, os.path.join(result_dir, 'pr_curve.png'))
     
     # Confusion matrix
-    plot_confusion_matrix(labels, predictions, args.threshold,
-                         os.path.join(result_dir, f'confusion_at_{args.threshold:.2f}.png'))
+    plot_confusion_matrix(labels, predictions, 0.5,
+                         os.path.join(result_dir, 'confusion_matrix.png'))
     
-    # 메트릭 계산
     metrics = calculate_metrics(labels, predictions)
-    
-    # 결과 저장
+
     save_privacy_metrics(
-        result_dir, weight_name, args.threshold, roc_auc, pr_auc,
+        result_dir, weight_name, 0.5, roc_auc, pr_auc,
         metrics, train_probs, test_probs,
-        metric_name="MLP Score"
+        metric_name="MLP Score", tpr_at_low_fpr=tpr_at_low_fpr
     )
-    
-    # MLP 모델 저장
+
     mlp_save_path = os.path.join(result_dir, 'mlp_attack_model.pth')
     torch.save(mlp_model.state_dict(), mlp_save_path)
     print(f"MLP model saved: {mlp_save_path}")
@@ -291,7 +280,7 @@ def main():
     print(f"\n{'='*60}")
     print("Results Summary")
     print(f"{'='*60}")
-    print_results(roc_auc, pr_auc, metrics)
+    print_results(roc_auc, pr_auc, metrics, tpr_at_low_fpr)
     print(f"\nAll results saved to: {result_dir}")
     print(f"{'='*60}\n")
 

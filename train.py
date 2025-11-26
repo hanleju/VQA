@@ -1,3 +1,6 @@
+'''
+python test.py -c ./cfg/easyvqa/Res_Bert_Lora_dp.yaml -w ./checkpoints/easyvqa/Res_Bert_Lora_dp/best_model.pth
+'''
 import os
 from functools import partial
 import torch

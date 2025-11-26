@@ -149,24 +149,66 @@ def load_model(args, device):
     return model, model_type
 
 
+def calculate_tpr_at_fpr(labels, scores, target_fpr=0.001):
+    """
+    특정 FPR에서의 TPR 계산
+    
+    Args:
+        labels: Ground truth labels
+        scores: Prediction scores
+        target_fpr: Target FPR (default: 0.001 = 0.1%)
+        
+    Returns:
+        tpr_at_target_fpr: TPR at target FPR
+    """
+    try:
+        fpr, tpr, thresholds = roc_curve(labels, scores)
+        
+        # FPR이 target_fpr보다 작거나 같은 지점 중 가장 큰 FPR 찾기
+        idx = np.where(fpr <= target_fpr)[0]
+        if len(idx) > 0:
+            # 가장 큰 FPR (target_fpr에 가장 가까운)
+            idx = idx[-1]
+            tpr_at_target = tpr[idx]
+        else:
+            # target_fpr보다 작은 FPR이 없으면 첫 번째 값
+            tpr_at_target = 0.0
+        
+        return tpr_at_target
+    except Exception as e:
+        print(f"Error calculating TPR @ FPR: {e}")
+        return None
+
+
 def plot_roc_curve(labels, scores, save_path):
-    """ROC Curve 시각화"""
+    """ROC Curve 시각화 및 TPR @ 0.1% FPR 계산"""
     try:
         roc_auc = roc_auc_score(labels, scores)
         fpr, tpr, _ = roc_curve(labels, scores)
+        
+        # TPR @ 0.1% FPR 계산
+        tpr_at_low_fpr = calculate_tpr_at_fpr(labels, scores, target_fpr=0.001)
+        
         plt.figure()
         plt.plot(fpr, tpr, label=f'ROC AUC={roc_auc:.4f}')
         plt.plot([0, 1], [0, 1], 'k--')
+        
+        # TPR @ 0.1% FPR 표시
+        if tpr_at_low_fpr is not None:
+            plt.plot(0.001, tpr_at_low_fpr, 'ro', markersize=8, 
+                    label=f'TPR@0.1%FPR={tpr_at_low_fpr:.4f}')
+        
         plt.xlabel('FPR')
         plt.ylabel('TPR')
         plt.title('ROC Curve')
         plt.legend()
         plt.savefig(save_path)
         plt.close()
-        return roc_auc
+        
+        return roc_auc, tpr_at_low_fpr
     except Exception as e:
         print(f"Error plotting ROC curve: {e}")
-        return None
+        return None, None
 
 
 def plot_pr_curve(labels, scores, save_path):
@@ -217,7 +259,7 @@ def calculate_metrics(labels, predictions):
 
 
 def save_privacy_metrics(result_dir, weight_name, threshold, roc_auc, pr_auc, 
-                        metrics, scores_member, scores_nonmember, metric_name="Confidence"):
+                        metrics, scores_member, scores_nonmember, metric_name="Confidence", tpr_at_low_fpr=None):
     """프라이버시 분석 결과 저장"""
     with open(os.path.join(result_dir, 'privacy_metrics.txt'), 'w') as f:
         f.write(f"Privacy Analysis Results for {weight_name}\n")
@@ -227,6 +269,8 @@ def save_privacy_metrics(result_dir, weight_name, threshold, roc_auc, pr_auc,
             f.write(f"ROC AUC: {roc_auc:.4f}\n")
         if pr_auc is not None:
             f.write(f"PR AUC: {pr_auc:.4f}\n")
+        if tpr_at_low_fpr is not None:
+            f.write(f"TPR @ 0.1% FPR: {tpr_at_low_fpr:.4f}\n")
         f.write("Membership Inference Attack Metrics (at threshold):\n")
         f.write(f"Accuracy: {metrics['accuracy']:.4f}\n")
         f.write(f"Precision: {metrics['precision']:.4f}\n")
@@ -237,12 +281,14 @@ def save_privacy_metrics(result_dir, weight_name, threshold, roc_auc, pr_auc,
         f.write(f"  Non-member: {np.mean(scores_nonmember):.4f}\n")
 
 
-def print_results(roc_auc, pr_auc, metrics):
+def print_results(roc_auc, pr_auc, metrics, tpr_at_low_fpr=None):
     """결과 출력"""
     if roc_auc is not None:
         print(f"ROC AUC: {roc_auc:.4f}")
     if pr_auc is not None:
         print(f"PR AUC: {pr_auc:.4f}")
+    if tpr_at_low_fpr is not None:
+        print(f"TPR @ 0.1% FPR: {tpr_at_low_fpr:.4f}")
     print(f"Attack Accuracy: {metrics['accuracy']:.4f}")
     print(f"Attack Precision: {metrics['precision']:.4f}")
     print(f"Attack Recall: {metrics['recall']:.4f}")

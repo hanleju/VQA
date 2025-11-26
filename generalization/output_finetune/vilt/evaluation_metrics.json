@@ -1,0 +1,16 @@
+{
+  "original": {
+    "loss": 14.734154967556744,
+    "accuracy": 0.2952503209242619,
+    "num_samples": 7790
+  },
+  "finetuned": {
+    "loss": 1.689500056983601,
+    "accuracy": 67.53530166880616,
+    "num_samples": 7790
+  },
+  "improvement": {
+    "loss_change": -13.044654910573144,
+    "accuracy_change": 67.24005134788189
+  }
+}

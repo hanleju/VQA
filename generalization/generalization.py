@@ -1,5 +1,5 @@
 """
-python generalization.py --models vilt --batch_size 32 --epochs 2 --lr 1e-6 --lambda_consistency 0.5
+python ./generalization/generalization.py --models vilt --batch_size 8 --epochs 3 --lr 1e-6 --lambda_consistency 0.5
 """
 import os
 import copy
@@ -8,8 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
-from transformers import (BlipProcessor, BlipForQuestionAnswering, 
-                          ViltProcessor, ViltForQuestionAnswering,
+from transformers import (ViltProcessor, ViltForQuestionAnswering,
                           BertTokenizer)
 from functools import partial
 from tqdm import tqdm
@@ -20,14 +19,18 @@ import argparse
 from data import VQADataset, collate_fn_with_tokenizer
 from src import (
     compute_weight_importance_mas, compute_difficulty_aware_consistency_loss, 
-    save_importance_dict, load_importance_dict, save_metrics, load_metrics, save_evaluation_results)
+    save_importance_dict, load_importance_dict, save_metrics, load_metrics, save_evaluation_results
+    )
 
 torch.manual_seed(42)
 
 def train_consistency_model(model, processor, model_name, dataloader, 
-                            importance_dict, initial_params, args, device):
+                            importance_dict, initial_params, args, device, split='test'):
     """
     Difficulty-aware consistency training
+    
+    Args:
+        split: 'train' 또는 'test' - 데이터셋의 split 지정
     """
     model.train()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -59,7 +62,7 @@ def train_consistency_model(model, processor, model_name, dataloader,
                 # 이미지 로드
                 image_paths = []
                 for img_id in batch['image_id']:
-                    base_path = os.path.join(args.dataset_root, 'train', 'images', img_id)
+                    base_path = os.path.join(args.dataset_root, split, 'images', img_id)
                     found = False
                     for ext in ['.jpg', '.png', '.jpeg']:
                         if os.path.exists(base_path + ext):
@@ -80,27 +83,17 @@ def train_consistency_model(model, processor, model_name, dataloader,
                 answers = batch['answer'][:len(images)].to(device)
                 answer_texts = batch['answer_text'][:len(images)] if 'answer_text' in batch else [str(a.item()) for a in answers]
                 
-                # === 1. Task Loss (VQA training) ===
-                model.train()
-                if "blip" in model_name.lower():
-                    inputs = processor(images=images, text=questions, return_tensors="pt", 
-                                     padding=True, truncation=True).to(device)
-                    labels = processor(text=answer_texts, return_tensors="pt", padding=True, truncation=True).input_ids.to(device)
-                    outputs = model(**inputs, labels=labels)
-                    task_loss = outputs.loss
-                    cons_loss = torch.tensor(0.0, device=device)  # BLIP: no logits
-                    
-                elif "vilt" in model_name.lower():
-                    inputs = processor(images=images, text=questions, return_tensors="pt", 
-                                     padding=True, truncation=True, max_length=40).to(device)
-                    outputs = model(**inputs)
-                    logits = outputs.logits
-                    
-                    # Task loss
-                    task_loss = criterion(logits, answers)
-                    
-                    # === 2. Difficulty-Aware Consistency Loss ===
-                    cons_loss = compute_difficulty_aware_consistency_loss(logits, answers)
+                # === 1. Task Loss & Consistency Loss ===
+                inputs = processor(images=images, text=questions, return_tensors="pt", 
+                                 padding=True, truncation=True, max_length=40).to(device)
+                outputs = model(**inputs)
+                logits = outputs.logits
+                
+                # Task loss
+                task_loss = criterion(logits, answers)
+                
+                # === 2. Difficulty-Aware Consistency Loss ===
+                cons_loss = compute_difficulty_aware_consistency_loss(logits, answers)
                 
                 # === 3. Weight Importance Regularization ===
                 reg_loss = torch.tensor(0.0, device=device)
@@ -172,9 +165,14 @@ def evaluate_difficulty_consistency(model, processor, model_name, dataloader,
     criterion = nn.CrossEntropyLoss(reduction='none')
     
     print(f"Evaluating difficulty-aware consistency for {model_name}...")
+    print(f"Dataset path: {dataset_root}/{split}/images/")
+    
+    total_batches = 0
+    successful_batches = 0
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating", leave=False):
+            total_batches += 1
             try:
                 # 이미지 로드
                 image_paths = []
@@ -189,11 +187,11 @@ def evaluate_difficulty_consistency(model, processor, model_name, dataloader,
                     if not found:
                         if os.path.exists(base_path):
                             image_paths.append(base_path)
-                        else:
-                            continue
                 
                 if len(image_paths) == 0:
                     continue
+                
+                successful_batches += 1
                 
                 images = [Image.open(path).convert('RGB') for path in image_paths]
                 questions = batch['question'][:len(images)]
@@ -201,15 +199,7 @@ def evaluate_difficulty_consistency(model, processor, model_name, dataloader,
                 answer_texts = batch['answer_text'][:len(images)] if 'answer_text' in batch else [str(a.item()) for a in answers]
                 
                 # Forward pass
-                if "blip" in model_name.lower():
-                    inputs = processor(images=images, text=questions, return_tensors="pt", 
-                                     padding=True, truncation=True).to(device)
-                    labels = processor(text=answer_texts, return_tensors="pt", padding=True, truncation=True).input_ids.to(device)
-                    outputs = model(**inputs, labels=labels)
-                    batch_loss = outputs.loss.item()
-                    losses_batch = np.array([batch_loss] * len(images))
-                    
-                elif "vilt" in model_name.lower():
+                if "vilt" in model_name.lower():
                     inputs = processor(images=images, text=questions, return_tensors="pt", 
                                      padding=True, truncation=True, max_length=40).to(device)
                     outputs = model(**inputs)
@@ -231,8 +221,22 @@ def evaluate_difficulty_consistency(model, processor, model_name, dataloader,
                 print(f"\n⚠ Error: {e}")
                 continue
     
+    print(f"\nProcessed {successful_batches}/{total_batches} batches successfully")
+    print(f"Collected {len(all_losses)} samples")
+    
     all_losses = np.array(all_losses)
     all_labels = np.array(all_labels)
+    
+    # 데이터가 없으면 빈 결과 반환
+    if len(all_losses) == 0:
+        print("⚠ Warning: No data collected. Returning empty metrics.")
+        return {
+            'overall_mean_loss': 0.0,
+            'overall_std_loss': 0.0,
+            'overall_consistency_cv': 0.0,
+            'num_samples': 0,
+            'difficulty_metrics': {}
+        }
     
     # === Overall metrics ===
     
@@ -349,14 +353,14 @@ def main():
     parser.add_argument('--dataset_root', type=str, default='D:/VQA/cocoqa', help='Dataset root path')
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size (larger = better consistency)')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers')
-    parser.add_argument('--epochs', type=int, default=2, help='Training epochs (짧게: 2-3)')
-    parser.add_argument('--lr', type=float, default=1e-6, help='Learning rate (매우 낮게)')
+    parser.add_argument('--epochs', type=int, default=3, help='Training epochs')
+    parser.add_argument('--lr', type=float, default=1e-6, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.01, help='Weight decay')
     parser.add_argument('--lambda_reg', type=float, default=0.1, help='Weight importance regularization')
     parser.add_argument('--lambda_consistency', type=float, default=0.5, help='Difficulty-aware consistency weight')
-    parser.add_argument('--aux_ratio', type=float, default=0.3, help='Ratio of auxiliary data')
-    parser.add_argument('--output_dir', type=str, default='./consistency/consistency_models', help='Output directory')
-    parser.add_argument('--models', type=str, default='vilt', help='Models to train (comma-separated): vilt, blip')
+    parser.add_argument('--aux_ratio', type=float, default=0.7, help='Ratio of auxiliary data')
+    parser.add_argument('--output_dir', type=str, default='./generalization/output', help='Output directory')
+    parser.add_argument('--models', type=str, default='vilt', help='Models to train (comma-separated): vilt')
     parser.add_argument('--recompute_importance', action='store_true', help='Recompute importance dict')
     parser.add_argument('--recompute_metrics', action='store_true', help='Recompute original metrics')
     
@@ -369,8 +373,7 @@ def main():
     
     # Model names
     model_dict = {
-        'vilt': 'dandelin/vilt-b32-finetuned-vqa',
-        'blip': 'Salesforce/blip-vqa-base'
+        'vilt': 'dandelin/vilt-b32-finetuned-vqa'
     }
     
     selected_models = [m.strip() for m in args.models.split(',')]
@@ -398,7 +401,7 @@ def main():
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     
-    full_dataset = VQADataset(root_dir=args.dataset_root, split='train', transform=image_transform)
+    full_dataset = VQADataset(root_dir=args.dataset_root, split='test', transform=image_transform)
     
     # Split into auxiliary and retain
     total_size = len(full_dataset)
@@ -407,12 +410,20 @@ def main():
     
     print(f"Dataset Split -> Auxiliary: {aux_size} samples, Retain: {retain_size} samples\n")
     
-    aux_dataset, _ = random_split(full_dataset, [aux_size, retain_size])
+    aux_dataset, retain_dataset = random_split(full_dataset, [aux_size, retain_size])
     
     aux_loader = DataLoader(
         dataset=aux_dataset,
         batch_size=args.batch_size,
         shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=args.num_workers
+    )
+    
+    retain_loader = DataLoader(
+        dataset=retain_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
         collate_fn=collate_fn,
         num_workers=args.num_workers
     )
@@ -427,9 +438,6 @@ def main():
         if "vilt" in model_name.lower():
             processor = ViltProcessor.from_pretrained(model_name)
             original_model = ViltForQuestionAnswering.from_pretrained(model_name, use_safetensors=True).to(device)
-        elif "blip" in model_name.lower():
-            processor = BlipProcessor.from_pretrained(model_name)
-            original_model = BlipForQuestionAnswering.from_pretrained(model_name).to(device)
         
         print(f"✓ Model loaded")
         
@@ -439,10 +447,10 @@ def main():
             print(f"\n>>> Loading pre-computed ORIGINAL metrics...")
             original_metrics = load_metrics(original_metrics_path)
         else:
-            print(f"\n>>> Evaluating ORIGINAL model...")
+            print(f"\n>>> Evaluating ORIGINAL model on RETAIN data...")
             original_metrics = evaluate_difficulty_consistency(
-                original_model, processor, model_name, aux_loader,
-                args.dataset_root, 'train', device
+                original_model, processor, model_name, retain_loader,
+                args.dataset_root, 'test', device
             )
             save_metrics(original_metrics, original_metrics_path)
         
@@ -455,10 +463,10 @@ def main():
             print(f"Loading pre-computed importance dict...")
             importance_dict = load_importance_dict(importance_path, device)
         else:
-            print(f"Computing weight importance...")
+            print(f"Computing weight importance on AUXILIARY data...")
             importance_dict = compute_weight_importance_mas(
                 model, aux_loader, processor, model_name, 
-                args.dataset_root, 'train', device
+                args.dataset_root, 'test', device
             )
             save_importance_dict(importance_dict, importance_path)
         
@@ -467,10 +475,11 @@ def main():
         for name, param in model.named_parameters():
             initial_params[name] = param.data.clone()
         
-        # Perform consistency training
+        # Perform consistency training on AUXILIARY data
+        print(f"\n>>> Training on AUXILIARY data...")
         train_consistency_model(
             model, processor, model_name, aux_loader,
-            importance_dict, initial_params, args, device
+            importance_dict, initial_params, args, device, split='test'
         )
         
         # Save trained model
@@ -489,11 +498,11 @@ def main():
         
         print(f"\n✓ Consistency-trained {model_name} saved to {save_dir}")
         
-        # === Evaluate AFTER training ===
-        print(f"\n>>> Evaluating TRAINED model...")
+        # === Evaluate AFTER training on RETAIN data ===
+        print(f"\n>>> Evaluating TRAINED model on RETAIN data...")
         trained_metrics = evaluate_difficulty_consistency(
-            model, processor, model_name, aux_loader,
-            args.dataset_root, 'train', device
+            model, processor, model_name, retain_loader,
+            args.dataset_root, 'test', device
         )
         
         # Save evaluation comparison

@@ -11,3 +11,5 @@ checkpoints/
 *.bat
 
 examples/
+
+output/
