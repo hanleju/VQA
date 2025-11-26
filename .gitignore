@@ -13,3 +13,4 @@ checkpoints/
 examples/
 
 output/
+output_finetune/
