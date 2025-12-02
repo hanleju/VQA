@@ -91,6 +91,15 @@ def create_model(args, device):
         'num_classes': args.num_classes
     }
     
+    # Token pruning 파라미터 (선택적)
+    if hasattr(args, 'use_token_pruning'):
+        model_kwargs['use_token_pruning'] = args.use_token_pruning
+        if args.use_token_pruning:
+            model_kwargs['prune_ratio'] = getattr(args, 'prune_ratio', 0.5)
+            model_kwargs['noise_scale'] = getattr(args, 'noise_scale', 0.1)
+            model_kwargs['mixup_alpha'] = getattr(args, 'mixup_alpha', 0.05)
+            model_kwargs['temperature'] = getattr(args, 'temperature', 0.5)
+    
     if args.model == "VQAModel_IB":
         model_kwargs['bottleneck_dim'] = getattr(args, 'bottleneck_dim', 256)
         model_kwargs['beta'] = getattr(args, 'beta', 0.1)

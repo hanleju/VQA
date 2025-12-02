@@ -68,6 +68,28 @@ def main():
     # 모델 생성
     model = create_model(args, device)
     
+    # Token Pruning 설정 확인 및 출력
+    use_token_pruning = getattr(args, 'use_token_pruning', False)
+    if use_token_pruning:
+        print(f"\n{'='*60}")
+        print(f"TOKEN PRUNING ENABLED")
+        print(f"{'='*60}")
+        print(f"Prune Ratio: {getattr(args, 'prune_ratio', 0.5)} ({(1-getattr(args, 'prune_ratio', 0.5))*100:.0f}% tokens retained)")
+        print(f"Noise Scale: {getattr(args, 'noise_scale', 0.1)}")
+        print(f"Mixup Alpha: {getattr(args, 'mixup_alpha', 0.05)}")
+        print(f"Temperature: {getattr(args, 'temperature', 0.5)}")
+        print(f"Fusion Type: {args.fusion_type}")
+        
+        # Fusion module이 실제로 pruning을 사용하는지 확인
+        if hasattr(model.fusion_module, 'use_pruning'):
+            if model.fusion_module.use_pruning:
+                print(f"✓ Fusion module pruning: ACTIVE")
+        print(f"{'='*60}\n")
+    else:
+        print(f"\n{'='*60}")
+        print(f"TOKEN PRUNING DISABLED (using standard fusion)")
+        print(f"{'='*60}\n")
+    
     # 기존 가중치가 있으면 로드 (추가 학습용)
     if hasattr(args, 'weights') and args.weights:
         print(f"Loading pre-trained weights from {args.weights}")

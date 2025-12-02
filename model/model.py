@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.fusion import Concat, Attention, CoAttention, GatedFusion
-
+from utils.fusion import Concat, Attention, CoAttention
 
 class VQAModel(nn.Module):
-    def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert",fusion_type="concat", hidden_dim=1024, num_classes=13):
+    def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert",
+                 fusion_type="concat", hidden_dim=1024, num_classes=13,
+                 use_token_pruning=False, prune_ratio=0.5, 
+                 noise_scale=0.1, mixup_alpha=0.05, temperature=0.5):
         super().__init__()
         
         self.fusion_type = fusion_type
@@ -13,6 +15,7 @@ class VQAModel(nn.Module):
         self.vision_encoder = vision(out_features=512)
         self.text_encoder = text(hidden_dim=512)
         
+        # Fusion module with optional privacy-aware token pruning
         if fusion_type == "concat":
             self.fusion_module = Concat(
                 v_dim=self.vision_encoder.output_dim,
@@ -20,13 +23,24 @@ class VQAModel(nn.Module):
             )
 
         elif fusion_type == "attention":
-            self.fusion_module = Attention(embed_dim=512, num_heads=8)
+            self.fusion_module = Attention(
+                embed_dim=512, num_heads=8,
+                use_pruning=use_token_pruning,
+                prune_ratio=prune_ratio,
+                noise_scale=noise_scale,
+                mixup_alpha=mixup_alpha,
+                temperature=temperature
+            )
 
         elif self.fusion_type == "co_attention":
-            self.fusion_module = CoAttention(embed_dim=512, num_heads=8)
-
-        elif self.fusion_type == "gated_fusion":
-            self.fusion_module = GatedFusion(embed_dim=512, num_heads=8)
+            self.fusion_module = CoAttention(
+                embed_dim=512, num_heads=8,
+                use_pruning=use_token_pruning,
+                prune_ratio=prune_ratio,
+                noise_scale=noise_scale,
+                mixup_alpha=mixup_alpha,
+                temperature=temperature
+            )
 
         else:
             raise ValueError(f"Unknown fusion type: {fusion_type}")
@@ -58,14 +72,16 @@ class VQAModel_IB(nn.Module):
     VQA Model with Information Bottleneck (IB)
     
     구조:
-    1. Fusion: 비전과 텍스트 특징 융합
+    1. Fusion: 비전과 텍스트 특징 융합 (Token Pruning 옵션)
     2. IB Encoder: 융합된 특징을 압축된 표현으로 인코딩
     3. IB Decoder: 압축된 표현을 원래 차원으로 복원 (재구성 손실 계산용)
     4. Classifier: 압축된 표현으로부터 분류
     """
     def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert", 
                  fusion_type="concat", hidden_dim=1024, num_classes=13, 
-                 bottleneck_dim=256, beta=0.1):
+                 bottleneck_dim=256, beta=0.1,
+                 use_token_pruning=False, prune_ratio=0.5,
+                 noise_scale=0.1, mixup_alpha=0.05, temperature=0.5):
         super().__init__()
         
         self.fusion_type = fusion_type
@@ -75,6 +91,7 @@ class VQAModel_IB(nn.Module):
         self.vision_encoder = vision(out_features=512)
         self.text_encoder = text(hidden_dim=512)
         
+        # Fusion module with optional privacy-aware token pruning
         if fusion_type == "concat":
             self.fusion_module = Concat(
                 v_dim=self.vision_encoder.output_dim,
@@ -82,10 +99,24 @@ class VQAModel_IB(nn.Module):
             )
 
         elif fusion_type == "attention":
-            self.fusion_module = Attention(embed_dim=512, num_heads=8)
+            self.fusion_module = Attention(
+                embed_dim=512, num_heads=8,
+                use_pruning=use_token_pruning,
+                prune_ratio=prune_ratio,
+                noise_scale=noise_scale,
+                mixup_alpha=mixup_alpha,
+                temperature=temperature
+            )
 
         elif self.fusion_type == "co_attention":
-            self.fusion_module = CoAttention(embed_dim=512, num_heads=8)
+            self.fusion_module = CoAttention(
+                embed_dim=512, num_heads=8,
+                use_pruning=use_token_pruning,
+                prune_ratio=prune_ratio,
+                noise_scale=noise_scale,
+                mixup_alpha=mixup_alpha,
+                temperature=temperature
+            )
 
         else:
             raise ValueError(f"Unknown fusion type: {fusion_type}")
@@ -214,7 +245,7 @@ class VQAModel_IB(nn.Module):
         
         # KL divergence: N(mu, logvar) vs N(0, 1)
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        kl_loss = kl_loss / mu.size(0)  # Batch 정규화
+        kl_loss = kl_loss / mu.size(0)  # Batch 정규화CoAttention
         
         # 재구성 손실
         reconstruction_loss = F.mse_loss(reconstructed, fused_feat)
