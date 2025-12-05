@@ -75,9 +75,8 @@ def main():
         print(f"TOKEN PRUNING ENABLED")
         print(f"{'='*60}")
         print(f"Prune Ratio: {getattr(args, 'prune_ratio', 0.5)} ({(1-getattr(args, 'prune_ratio', 0.5))*100:.0f}% tokens retained)")
-        print(f"Noise Scale: {getattr(args, 'noise_scale', 0.1)}")
+        print(f"Adv Ratio: {getattr(args, 'adv_ratio', 0.1)}")
         print(f"Mixup Alpha: {getattr(args, 'mixup_alpha', 0.05)}")
-        print(f"Temperature: {getattr(args, 'temperature', 0.5)}")
         print(f"Fusion Type: {args.fusion_type}")
         
         # Fusion module이 실제로 pruning을 사용하는지 확인
@@ -170,7 +169,6 @@ def main():
         for epoch in range(args.epochs):
             print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
 
-            # DP-SGD with VQAModel_IB는 아직 미구현
             if use_dp_sgd and args.model == "VQAModel_IB":
                 raise NotImplementedError("DP-SGD with VQAModel_IB is not yet implemented")
             

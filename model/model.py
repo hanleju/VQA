@@ -7,7 +7,7 @@ class VQAModel(nn.Module):
     def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert",
                  fusion_type="concat", hidden_dim=1024, num_classes=13,
                  use_token_pruning=False, prune_ratio=0.5, 
-                 noise_scale=0.1, mixup_alpha=0.05, temperature=0.5):
+                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2):
         super().__init__()
         
         self.fusion_type = fusion_type
@@ -27,9 +27,9 @@ class VQAModel(nn.Module):
                 embed_dim=512, num_heads=8,
                 use_pruning=use_token_pruning,
                 prune_ratio=prune_ratio,
-                noise_scale=noise_scale,
                 mixup_alpha=mixup_alpha,
-                temperature=temperature
+                adversarial_mix=adversarial_mix,
+                adv_ratio=adv_ratio
             )
 
         elif self.fusion_type == "co_attention":
@@ -37,9 +37,9 @@ class VQAModel(nn.Module):
                 embed_dim=512, num_heads=8,
                 use_pruning=use_token_pruning,
                 prune_ratio=prune_ratio,
-                noise_scale=noise_scale,
                 mixup_alpha=mixup_alpha,
-                temperature=temperature
+                adversarial_mix=adversarial_mix,
+                adv_ratio=adv_ratio
             )
 
         else:
@@ -81,7 +81,7 @@ class VQAModel_IB(nn.Module):
                  fusion_type="concat", hidden_dim=1024, num_classes=13, 
                  bottleneck_dim=256, beta=0.1,
                  use_token_pruning=False, prune_ratio=0.5,
-                 noise_scale=0.1, mixup_alpha=0.05, temperature=0.5):
+                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2):
         super().__init__()
         
         self.fusion_type = fusion_type
@@ -103,9 +103,9 @@ class VQAModel_IB(nn.Module):
                 embed_dim=512, num_heads=8,
                 use_pruning=use_token_pruning,
                 prune_ratio=prune_ratio,
-                noise_scale=noise_scale,
                 mixup_alpha=mixup_alpha,
-                temperature=temperature
+                adversarial_mix=adversarial_mix,
+                adv_ratio=adv_ratio
             )
 
         elif self.fusion_type == "co_attention":
@@ -113,9 +113,9 @@ class VQAModel_IB(nn.Module):
                 embed_dim=512, num_heads=8,
                 use_pruning=use_token_pruning,
                 prune_ratio=prune_ratio,
-                noise_scale=noise_scale,
                 mixup_alpha=mixup_alpha,
-                temperature=temperature
+                adversarial_mix=adversarial_mix,
+                adv_ratio=adv_ratio
             )
 
         else:

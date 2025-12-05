@@ -96,9 +96,9 @@ def create_model(args, device):
         model_kwargs['use_token_pruning'] = args.use_token_pruning
         if args.use_token_pruning:
             model_kwargs['prune_ratio'] = getattr(args, 'prune_ratio', 0.5)
-            model_kwargs['noise_scale'] = getattr(args, 'noise_scale', 0.1)
             model_kwargs['mixup_alpha'] = getattr(args, 'mixup_alpha', 0.05)
-            model_kwargs['temperature'] = getattr(args, 'temperature', 0.5)
+            model_kwargs['adversarial_mix'] = getattr(args, 'adversarial_mix', True)
+            model_kwargs['adv_ratio'] = getattr(args, 'adv_ratio', 0.2)
     
     if args.model == "VQAModel_IB":
         model_kwargs['bottleneck_dim'] = getattr(args, 'bottleneck_dim', 256)
