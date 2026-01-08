@@ -9,10 +9,6 @@ cfg/
 checkpoints/
 *.pth
 
-!cfg.yaml
-!optuna.yaml
-
-*.yaml
 *.bat
 
 examples/
