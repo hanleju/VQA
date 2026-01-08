@@ -43,7 +43,8 @@ def main():
     
     print(f"Data Split (7:2:1) -> Train: {train_size} samples, Validation: {val_size} samples, Test: {test_size} samples")
     
-    train_dataset, val_dataset, test_dataset = random_split(full_dataset, [train_size, val_size, test_size])
+    train_dataset, val_dataset, test_dataset = random_split(full_dataset, 
+                                                            [train_size, val_size, test_size])
 
     collate_fn = partial(collate_fn_with_tokenizer, tokenizer=tokenizer)
     
@@ -69,7 +70,7 @@ def main():
     model = create_model(args, device)
     
     # Token Pruning 설정 확인 및 출력
-    use_token_pruning = getattr(args, 'use_token_pruning', False)
+    use_token_pruning = getattr(args, 'use_token_pruning', True)
     if use_token_pruning:
         print(f"\n{'='*60}")
         print(f"TOKEN PRUNING ENABLED")
@@ -78,7 +79,11 @@ def main():
         print(f"Adv Ratio: {getattr(args, 'adv_ratio', 0.1)}")
         print(f"Mixup Alpha: {getattr(args, 'mixup_alpha', 0.05)}")
         print(f"Fusion Type: {args.fusion_type}")
-        
+        print(f"Noise Injection: {getattr(args, 'noise_injection', False)}")
+        print(f"Noise Scale: {getattr(args, 'noise_scale', 0.0)}")
+        print(f"Noise Type: {getattr(args, 'noise_type', 'gaussian')}")
+
+                                     
         # Fusion module이 실제로 pruning을 사용하는지 확인
         if hasattr(model.fusion_module, 'use_pruning'):
             if model.fusion_module.use_pruning:
@@ -229,7 +234,10 @@ def main():
                 break
 
     print(f"\n--- Train End ---")
-    print(f"Best Validation ACC: {best_val_acc:.2f}%")
+    log_msg = f"Best Validation ACC: {best_val_acc:.2f}%"
+    print(log_msg)
+    with open(log_path, "a") as log_file:
+        log_file.write(log_msg + "\n")
     
     if use_dp_sgd:
         try:

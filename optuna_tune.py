@@ -2,7 +2,7 @@
 Optuna를 사용한 Multi-objective 하이퍼파라미터 튜닝
 목표: Accuracy 최대화 + MIA Attack Accuracy 최소화 (Privacy 강건성)
 
-python optuna_tune.py -c ./cfg/12.04/base_config.yaml --n_trials 50
+python optuna_tune.py -c ./cfg/12.08/optuna.yaml --n_trials 50
 """
 import os
 import sys
@@ -126,7 +126,7 @@ class OptunaTrainer:
             train_loss, train_acc = train(
                 model, self.train_loader, optimizer, criterion, self.device, epoch
             )
-            val_loss, val_acc = validate(
+            val_loss, val_acc, metrics = validate(
                 model, self.val_loader, criterion, self.device
             )
             scheduler.step()
@@ -181,11 +181,16 @@ class OptunaTrainer:
             실제로는 val_accuracy는 maximize, mia_accuracy는 minimize
         """
         # 하이퍼파라미터 샘플링
-        prune_ratio = trial.suggest_float('prune_ratio', 0.3, 0.6, step=0.1)
-        adv_ratio = trial.suggest_float('adv_ratio', 0.3, 0.7, step=0.1)
-        mixup_alpha = trial.suggest_float('mixup_alpha', 0.05, 0.4, log=True)
-        lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
-        weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
+        prune_ratio = trial.suggest_float('prune_ratio', 0.4, 0.4, step=0.1)
+        adv_ratio = trial.suggest_float('adv_ratio', 0.4, 0.4, step=0.1)
+        mixup_alpha = trial.suggest_float('mixup_alpha', 0.15, 0.3, log=True)
+        lr = trial.suggest_float('lr', 5e-5, 5e-4, log=True)
+        weight_decay = trial.suggest_float('weight_decay', 1e-3, 1e-3, log=True)
+        
+        # Privacy-aware noise injection parameters
+        noise_scale = trial.suggest_float('noise_scale', 0.5, 2.0, log=True)
+        base_noise_type = self.base_config.get('noise_type', 'gaussian')
+        noise_type = trial.suggest_categorical('noise_type', ['gaussian', 'uniform'])
         
         # 설정 업데이트
         trial_config = self.base_config.copy()
@@ -195,7 +200,10 @@ class OptunaTrainer:
             'adv_ratio': adv_ratio,
             'mixup_alpha': mixup_alpha,
             'lr': lr,
-            'weight_decay': weight_decay
+            'weight_decay': weight_decay,
+            'noise_injection': True,
+            'noise_scale': noise_scale,
+            'noise_type': base_noise_type
         })
         
         print(f"\n{'='*60}")
@@ -206,6 +214,9 @@ class OptunaTrainer:
         print(f"Mixup Alpha: {mixup_alpha:.4f}")
         print(f"LR: {lr:.6f}")
         print(f"Weight Decay: {weight_decay:.6f}")
+        print(f"Noise Injection: {True}")
+        print(f"Noise Scale: {noise_scale:.4f}")
+        print(f"Noise Type: {base_noise_type}")
         print(f"{'='*60}\n")
         
         # 모델 학습
@@ -234,11 +245,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', type=str, required=True,
                        help='Base YAML config file')
-    parser.add_argument('--n_trials', type=int, default=50,
+    parser.add_argument('--n_trials', type=int, default=5,
                        help='Number of Optuna trials')
-    parser.add_argument('--n_epochs', type=int, default=15,
+    parser.add_argument('--n_epochs', type=int, default=5,
                        help='Epochs per trial')
-    parser.add_argument('--study_name', type=str, default='vqa_privacy_tuning',
+    parser.add_argument('--study_name', type=str, default='vqa_privacy_noise',
                        help='Optuna study name')
     parser.add_argument('--storage', type=str, default=None,
                        help='Optuna storage (e.g., sqlite:///optuna.db)')

@@ -7,7 +7,8 @@ class VQAModel(nn.Module):
     def __init__(self, vision = "VisionEncoder_ResNet50", text="TextEncoder_Bert",
                  fusion_type="concat", hidden_dim=1024, num_classes=13,
                  use_token_pruning=False, prune_ratio=0.5, 
-                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2):
+                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2,
+                 noise_injection=False, noise_scale=0.01, noise_type='gaussian'):
         super().__init__()
         
         self.fusion_type = fusion_type
@@ -39,7 +40,10 @@ class VQAModel(nn.Module):
                 prune_ratio=prune_ratio,
                 mixup_alpha=mixup_alpha,
                 adversarial_mix=adversarial_mix,
-                adv_ratio=adv_ratio
+                adv_ratio=adv_ratio,
+                noise_injection=noise_injection,
+                noise_scale=noise_scale,
+                noise_type=noise_type
             )
 
         else:

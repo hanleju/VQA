@@ -99,6 +99,9 @@ def create_model(args, device):
             model_kwargs['mixup_alpha'] = getattr(args, 'mixup_alpha', 0.05)
             model_kwargs['adversarial_mix'] = getattr(args, 'adversarial_mix', True)
             model_kwargs['adv_ratio'] = getattr(args, 'adv_ratio', 0.2)
+            model_kwargs['noise_injection'] = getattr(args, 'noise_injection', False)
+            model_kwargs['noise_scale'] = getattr(args, 'noise_scale', 0.01)
+            model_kwargs['noise_type'] = getattr(args, 'noise_type', 'gaussian')
     
     if args.model == "VQAModel_IB":
         model_kwargs['bottleneck_dim'] = getattr(args, 'bottleneck_dim', 256)

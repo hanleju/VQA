@@ -4,6 +4,8 @@ __pycache__/
 *.pyd
 __pypackages__/
 
+cfg/
+
 checkpoints/
 *.pth
 

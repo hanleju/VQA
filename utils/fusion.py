@@ -9,14 +9,19 @@ class PrivacyAwareTokenPruning(nn.Module):
     Attention score 기반으로 token을 pruning하되, privacy를 위해:
     1. Adversarial mixing (중요 토큰과 덜 중요한 토큰 교체)
     2. Mixup (제거된 정보를 약간 섞음)
+    3. Noise injection (중요한 vision token에 노이즈 추가)
     """
     def __init__(self, prune_ratio=0.5, mixup_alpha=0.05, 
-                 adversarial_mix=True, adv_ratio=0.2):
+                 adversarial_mix=True, adv_ratio=0.2,
+                 noise_injection=True, noise_scale=0.01, noise_type='gaussian'):
         super().__init__()
         self.prune_ratio = prune_ratio  # 제거할 비율 (0.5 = 50% 제거)
         self.mixup_alpha = mixup_alpha  # Mixup 비율
         self.adversarial_mix = adversarial_mix  # Adversarial mixing 활성화
         self.adv_ratio = adv_ratio  # Top-k 중 교체할 비율 (0.2 = 20% 교체)
+        self.noise_injection = noise_injection  # 노이즈 주입 활성화
+        self.noise_scale = noise_scale  # 노이즈 크기
+        self.noise_type = noise_type  # 노이즈 타입 ('gaussian' or 'uniform')
     
     def forward(self, seq, attn_weights):
         """
@@ -39,7 +44,8 @@ class PrivacyAwareTokenPruning(nn.Module):
         _, top_indices = torch.topk(attn_weights, k=k, dim=-1)
         
         # ===== 2. Adversarial Mixing (Privacy 향상) =====
-        if self.training and self.adversarial_mix:
+        # if self.training and self.adversarial_mix:
+        if self.adversarial_mix:
             # 중요하지 않은 토큰(bottom-k) 찾기
             remaining_k = N - k
             _, bottom_indices = torch.topk(attn_weights, k=remaining_k, dim=-1, largest=False)
@@ -62,7 +68,12 @@ class PrivacyAwareTokenPruning(nn.Module):
         top_indices_expanded = top_indices.unsqueeze(-1).expand(-1, -1, D)
         selected_tokens = torch.gather(seq, 1, top_indices_expanded)
         
-        # ===== 3. 버려지는 토큰들의 평균을 하나의 토큰으로 추가 =====
+        # ===== 3. Noise Injection (Privacy 향상) =====
+        # Top-k selection된 중요한 vision token에만 노이즈 추가
+        if self.noise_injection:
+            selected_tokens = self._add_privacy_noise(selected_tokens)
+        
+        # ===== 4. 버려지는 토큰들의 평균을 하나의 토큰으로 추가 =====
         if self.mixup_alpha > 0:
             # 제거될 토큰들의 mask
             mask = torch.ones(B, N, device=seq.device)
@@ -81,7 +92,28 @@ class PrivacyAwareTokenPruning(nn.Module):
             selected_tokens = torch.cat([selected_tokens, remaining_token], dim=1)  # (B, K+1, D)
         
         return selected_tokens
-
+    
+    def _add_privacy_noise(self, tokens):
+        """
+        Add privacy-preserving noise to vision tokens
+        
+        Args:
+            tokens: (B, K, D) - selected important tokens
+        
+        Returns:
+            noisy_tokens: (B, K, D) - tokens with added noise
+        """
+        if self.noise_type == 'gaussian':
+            noise = torch.normal(0, self.noise_scale, size=tokens.shape, device=tokens.device)
+        elif self.noise_type == 'uniform':
+            noise = torch.empty_like(tokens).uniform_(-self.noise_scale, self.noise_scale)
+        else:
+            raise ValueError(f"Unsupported noise type: {self.noise_type}")
+        
+        # 노이즈를 토큰에 추가
+        noisy_tokens = tokens + noise
+        
+        return noisy_tokens
 
 class Concat(nn.Module):
     """Concat"""
@@ -154,7 +186,8 @@ class Attention(nn.Module):
 class CoAttention(nn.Module):
     """Co-Attention with privacy-aware token pruning"""
     def __init__(self, embed_dim=512, num_heads=8, use_pruning=False, prune_ratio=0.5,
-                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2):
+                 mixup_alpha=0.05, adversarial_mix=True, adv_ratio=0.2,
+                 noise_injection=True, noise_scale=0.01, noise_type='gaussian'):
         super().__init__()
         
         # Text-to-Vision Attention
@@ -169,17 +202,25 @@ class CoAttention(nn.Module):
         # Privacy-aware token pruning
         self.use_pruning = use_pruning
         if use_pruning:
+            # Vision tokens에만 노이즈 주입 (spatial 정보 보호)
             self.v_pruning = PrivacyAwareTokenPruning(
                 prune_ratio=prune_ratio,
                 mixup_alpha=mixup_alpha,
                 adversarial_mix=adversarial_mix,
-                adv_ratio=adv_ratio
+                adv_ratio=adv_ratio,
+                noise_injection=noise_injection,  # Vision token에는 노이즈 적용
+                noise_scale=noise_scale,
+                noise_type=noise_type
             )
+            # Text tokens는 노이즈 주입 완전 비활성화
             self.q_pruning = PrivacyAwareTokenPruning(
                 prune_ratio=prune_ratio,
                 mixup_alpha=mixup_alpha,
                 adversarial_mix=adversarial_mix,
-                adv_ratio=adv_ratio
+                adv_ratio=adv_ratio,
+                noise_injection=False,  # Text token은 노이즈 주입 완전 비활성화
+                noise_scale=0,        # 노이즈 스케일도 0으로 설정
+                noise_type=noise_type
             )
 
     def forward(self, v_seq, v_global, q_seq, q_global):
@@ -195,7 +236,7 @@ class CoAttention(nn.Module):
                 key=v_seq, 
                 value=v_seq
             )
-            # 중요한 vision tokens만 선택 (privacy-aware)
+            # 중요한 vision tokens만 선택 (노이즈 주입 포함)
             v_seq_pruned = self.v_pruning(v_seq, v_attn_weights)
             
             # Vision->Text: v가 q의 어떤 토큰에 주목하는가?
@@ -204,14 +245,13 @@ class CoAttention(nn.Module):
                 key=q_seq,
                 value=q_seq
             )
-            # 중요한 text tokens만 선택 (privacy-aware)
+            # 중요한 text tokens만 선택 (노이즈 주입 없음)
             q_seq_pruned = self.q_pruning(q_seq, q_attn_weights)
             
             # ===== Pruned tokens aggregation =====
             # 이미 중요한 토큰만 선택했으므로 mean pooling으로 집계
-            # (추가 attention은 redundant하므로 제거)
-            attended_v = v_seq_pruned.mean(dim=1)  # (B, 512)
-            attended_q = q_seq_pruned.mean(dim=1)  # (B, 512)
+            attended_v = v_seq_pruned.mean(dim=1)  # (B, 512) - 노이즈 포함
+            attended_q = q_seq_pruned.mean(dim=1)  # (B, 512) - 노이즈 없음
         else:
             # text->image (Q=q_global, K=v_seq, V=v_seq)
             attended_v, _ = self.txt_to_vis_attn(
